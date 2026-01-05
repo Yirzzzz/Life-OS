@@ -1,0 +1,44 @@
+<div class="goal-card bg-white p-5 rounded border border-slate-200 shadow-sm">
+  <div class="flex items-start justify-between gap-4">
+    <div>
+      <div class="text-xs text-slate-500 uppercase">{{ goal.type }}</div>
+      <div class="text-lg font-semibold">{{ goal.title }}</div>
+    </div>
+    <div class="flex items-center gap-2">
+      <div class="text-xs text-slate-500">{{ goal.start_date }} - {{ goal.end_date }}</div>
+      <button
+        class="text-xs px-2 py-1 border rounded"
+        hx-get="/goals/{{ goal.id }}/edit"
+        hx-target="closest .goal-card"
+        hx-swap="outerHTML"
+      >
+        Edit
+      </button>
+      <button
+        class="text-xs px-2 py-1 border rounded text-rose-600 border-rose-200"
+        hx-post="/goals/{{ goal.id }}/delete"
+        hx-target="closest .goal-card"
+        hx-swap="outerHTML"
+        hx-confirm="Confirm delete Goal &quot;{{ goal.title }}&quot;? This action cannot be undone."
+      >
+        Delete
+      </button>
+    </div>
+  </div>
+  <div class="mt-3 text-sm text-slate-600 whitespace-pre-line">{{ goal.description_md }}</div>
+  <div class="mt-3 text-xs text-slate-500">Tags: {{ goal.tags|join(", ") if goal.tags else "None" }}</div>
+  <div class="mt-4 border-t border-slate-100 pt-3">
+    <div class="text-sm font-semibold">Milestones</div>
+    <div class="mt-2 space-y-2">
+      {% for milestone in milestones if milestone.goal_id == goal.id %}
+        <div class="flex items-center justify-between text-sm">
+          <div>{{ milestone.title }}</div>
+          <div class="text-xs text-slate-500">{{ milestone.due_date }} - {{ milestone.status }}</div>
+        </div>
+      {% endfor %}
+      {% if (milestones|selectattr("goal_id", "equalto", goal.id)|list)|length == 0 %}
+        <div class="text-sm text-slate-400">No milestones yet.</div>
+      {% endif %}
+    </div>
+  </div>
+</div>

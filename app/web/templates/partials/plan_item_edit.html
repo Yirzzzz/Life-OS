@@ -1,0 +1,35 @@
+<div class="plan-item border border-slate-200 rounded px-3 py-2 text-sm">
+  <form
+    class="space-y-2"
+    hx-post="/plans/items/{{ item.id }}/edit"
+    hx-target="closest .plan-item"
+    hx-swap="outerHTML"
+  >
+    <input class="w-full border rounded px-2 py-1 text-sm" name="title" value="{{ item.title }}" required />
+    <select class="w-full border rounded px-2 py-1 text-sm" name="linked_goal_id">
+      <option value="">Link goal (optional)</option>
+      {% for goal in goals %}
+        <option value="{{ goal.id }}" {% if item.linked_goal_id == goal.id %}selected{% endif %}>{{ goal.title }}</option>
+      {% endfor %}
+    </select>
+    <select class="w-full border rounded px-2 py-1 text-sm" name="linked_habit_id">
+      <option value="">Link habit (optional)</option>
+      {% for habit in habits %}
+        <option value="{{ habit.id }}" {% if item.linked_habit_id == habit.id %}selected{% endif %}>{{ habit.title }}</option>
+      {% endfor %}
+    </select>
+    <input class="w-full border rounded px-2 py-1 text-sm" name="note" value="{{ item.note }}" placeholder="Note" />
+    <div class="flex items-center gap-2">
+      <button class="flex-1 bg-slate-900 text-white py-1 rounded">Save</button>
+      <button
+        type="button"
+        class="px-3 py-1 border rounded"
+        hx-get="/plans/items/{{ item.id }}"
+        hx-target="closest .plan-item"
+        hx-swap="outerHTML"
+      >
+        Cancel
+      </button>
+    </div>
+  </form>
+</div>

@@ -1,0 +1,32 @@
+<div class="goal-card bg-white p-5 rounded border border-slate-200 shadow-sm">
+  <form
+    class="space-y-3"
+    hx-post="/goals/{{ goal.id }}/edit"
+    hx-target="closest .goal-card"
+    hx-swap="outerHTML"
+  >
+    <input class="w-full border rounded px-3 py-2 text-sm" name="title" value="{{ goal.title }}" required />
+    <select class="w-full border rounded px-3 py-2 text-sm" name="type">
+      <option value="year" {% if goal.type == 'year' %}selected{% endif %}>Year Goal</option>
+      <option value="phase" {% if goal.type == 'phase' %}selected{% endif %}>Phase Goal</option>
+    </select>
+    <div class="grid grid-cols-2 gap-3">
+      <input class="w-full border rounded px-3 py-2 text-sm" type="date" name="start_date" value="{{ goal.start_date }}" required />
+      <input class="w-full border rounded px-3 py-2 text-sm" type="date" name="end_date" value="{{ goal.end_date }}" required />
+    </div>
+    <textarea class="w-full border rounded px-3 py-2 text-sm" name="description_md" rows="3">{{ goal.description_md }}</textarea>
+    <input class="w-full border rounded px-3 py-2 text-sm" name="tags" value="{{ goal.tags|join(', ') if goal.tags }}" />
+    <div class="flex items-center gap-2">
+      <button class="flex-1 bg-slate-900 text-white py-2 rounded text-sm">Save</button>
+      <button
+        type="button"
+        class="px-3 py-2 border rounded text-sm"
+        hx-get="/goals/{{ goal.id }}"
+        hx-target="closest .goal-card"
+        hx-swap="outerHTML"
+      >
+        Cancel
+      </button>
+    </div>
+  </form>
+</div>

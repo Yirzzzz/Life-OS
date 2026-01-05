@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block page_title %}Logs{% endblock %}
+{% block content %}
+  <div class="grid lg:grid-cols-3 gap-8">
+    <div class="lg:col-span-2 space-y-6">
+      <div class="bg-white p-5 rounded border border-slate-200 shadow-sm">
+        <div class="flex items-center justify-between">
+          <div class="text-base font-semibold">时段日志表</div>
+          <div class="text-xs text-slate-500">{{ selected_date }}</div>
+        </div>
+        <div class="mt-4">
+          <div class="overflow-x-auto">
+            <table class="min-w-full text-sm border border-slate-200">
+              <tbody class="divide-y divide-slate-200">
+                {% for row in period_rows %}
+                  <tr>
+                    <td class="w-28 bg-slate-50 px-4 py-3 text-xs text-slate-500 align-top">{{ row.label }}</td>
+                    <td class="px-4 py-3 align-top">
+                      {% if row.text %}
+                        <div class="prose prose-sm max-w-none">{{ row.html | safe }}</div>
+                      {% else %}
+                        <div class="text-xs text-slate-400">今天{{ row.label }}你做了什么？</div>
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="bg-white p-5 rounded border border-slate-200 shadow-sm">
+        <div class="flex items-center justify-between">
+          <div class="text-base font-semibold">日志表格</div>
+          <div class="flex items-center gap-2 text-sm flex-wrap">
+            <input class="border rounded px-2 py-1" type="date" id="filter-start" name="start_date" />
+            <input class="border rounded px-2 py-1" type="date" id="filter-end" name="end_date" />
+            <input class="border rounded px-2 py-1" type="text" id="filter-tag" name="tag" placeholder="标签" />
+            <input class="border rounded px-2 py-1" type="text" id="filter-plan" name="plan_item" placeholder="计划项" />
+            <button
+              class="px-3 py-1 border rounded"
+              hx-get="/logs/table"
+              hx-target="#log-table"
+              hx-include="#filter-start,#filter-end,#filter-tag,#filter-plan"
+            >
+              过滤
+            </button>
+          </div>
+        </div>
+        <div id="log-table" class="mt-4">
+          {% include "partials/log_table.html" with context %}
+        </div>
+      </div>
+    </div>
+    <div class="space-y-6">
+      <div class="bg-white p-5 rounded border border-slate-200 shadow-sm">
+        <div class="flex items-center justify-between">
+          <div class="text-base font-semibold">单日编辑</div>
+          <input class="border rounded px-2 py-1 text-sm" type="date" value="{{ selected_date }}" onchange="location.href='/logs?target_date=' + this.value" />
+        </div>
+        {% if used_fallback %}
+          <div class="mt-2 text-xs text-amber-600">
+            日期参数无效，已回退到今日。
+          </div>
+        {% endif %}
+        <div class="mt-2 text-xs text-slate-500">
+          今日记录请在首页编辑，这里用于查看或补充历史日志。
+          <a class="text-blue-600" href="/dashboard">去首页</a>
+        </div>
+        <form
+          class="mt-4 space-y-4"
+          hx-post="/logs/save"
+          hx-target="#log-save-result"
+          hx-indicator="#hx-indicator"
+          onsubmit="preparePeriods(event)"
+        >
+          <input type="hidden" name="date_value" value="{{ selected_date }}" />
+          <input type="hidden" name="periods_text" id="periods_text" />
+          {% for period in periods %}
+            <div>
+              <label class="text-xs text-slate-500">{{ period_labels.get(period, period) }}</label>
+              <textarea
+                class="w-full border rounded px-3 py-2 text-sm markdown-editor"
+                rows="2"
+                id="editor-{{ period }}"
+                data-period="{{ period }}"
+                placeholder="今天{{ period_labels.get(period, period) }}你做了什么？"
+              >{% if log %}{% for entry in log.period_entries %}{% if entry.period == period %}{{ entry.text }}{% endif %}{% endfor %}{% endif %}</textarea>
+            </div>
+          {% endfor %}
+          <textarea class="w-full border rounded px-3 py-2 text-sm" name="journal_md" rows="4" placeholder="Markdown 日记">{% if log %}{{ log.journal_md }}{% endif %}</textarea>
+          <input class="w-full border rounded px-3 py-2 text-sm" name="tags" placeholder="标签（逗号分隔）" value="{{ log.tags|join(', ') if log }}" />
+          <div class="flex items-center gap-2">
+            <button class="flex-1 bg-slate-900 text-white py-2 rounded text-sm">保存</button>
+            <button
+              type="button"
+              class="px-3 py-2 border rounded text-sm"
+              hx-post="/logs/align"
+              hx-target="#align-result"
+              hx-include="[name='date_value']"
+            >
+              自动对齐
+            </button>
+          </div>
+        </form>
+        <div id="log-save-result" class="mt-3"></div>
+        <div id="align-result" class="mt-3"></div>
+      </div>
+      <div class="bg-white p-5 rounded border border-slate-200 shadow-sm">
+        <div class="text-base font-semibold">Markdown 预览</div>
+        <div class="mt-3 prose prose-sm max-w-none">{{ journal_html | safe }}</div>
+      </div>
+    </div>
+  </div>
+  <link rel="stylesheet" href="https://unpkg.com/easymde/dist/easymde.min.css" />
+  <link
+    rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css"
+  />
+  <script src="https://unpkg.com/easymde/dist/easymde.min.js"></script>
+  <script>
+    function preparePeriods(event) {
+      const texts = Array.from(document.querySelectorAll("textarea[data-period]"))
+        .map((el) => `${el.dataset.period}::${el.value}`)
+        .join("||");
+      document.getElementById("periods_text").value = texts;
+    }
+    document.addEventListener("DOMContentLoaded", function () {
+      document.querySelectorAll(".markdown-editor").forEach((el) => {
+        new EasyMDE({
+          element: el,
+          spellChecker: false,
+          status: false,
+          minHeight: "120px",
+          autoDownloadFontAwesome: false,
+        });
+      });
+    });
+  </script>
+{% endblock %}

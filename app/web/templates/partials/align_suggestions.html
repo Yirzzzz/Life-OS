@@ -1,0 +1,20 @@
+{% if suggestions %}
+  <div class="bg-slate-50 border border-slate-200 rounded p-3 text-sm space-y-2">
+    <div class="font-semibold">自动对齐建议</div>
+    {% for suggestion in suggestions %}
+        <div class="flex items-center justify-between">
+          <div>{{ suggestion.title }}</div>
+        {% if suggestion.type == "plan" %}
+          <form hx-post="/plans/items/{{ suggestion.id }}/toggle?fragment=align" hx-target="closest div" hx-swap="outerHTML">
+            <input type="hidden" name="completed" value="true" />
+            <button class="text-xs px-2 py-1 border rounded">补记完成</button>
+          </form>
+        {% else %}
+          <div class="text-xs text-slate-500">匹配习惯</div>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="text-sm text-slate-500">未发现可对齐的条目</div>
+{% endif %}

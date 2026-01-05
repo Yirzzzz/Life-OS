@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block page_title %}Goals{% endblock %}
+{% block content %}
+  <div class="grid lg:grid-cols-3 gap-8">
+    <div class="lg:col-span-2 space-y-6">
+      {% if goals %}
+        {% for goal in goals %}
+          {% include "partials/goal_card.html" %}
+        {% endfor %}
+      {% else %}
+        <div class="bg-white p-8 rounded border border-slate-200 text-center text-slate-500">
+          还没有目标，先创建一个年度或阶段目标。
+        </div>
+      {% endif %}
+    </div>
+    <div class="space-y-6">
+      <form class="bg-white p-5 rounded border border-slate-200 shadow-sm space-y-4" method="post" action="/goals">
+        <div class="text-base font-semibold">新增目标</div>
+        <input class="w-full border rounded px-3 py-2 text-sm" name="title" placeholder="目标标题" required />
+        <select class="w-full border rounded px-3 py-2 text-sm" name="type">
+          <option value="year">Year Goal</option>
+          <option value="phase">Phase Goal</option>
+        </select>
+        <input class="w-full border rounded px-3 py-2 text-sm" type="date" name="start_date" required />
+        <input class="w-full border rounded px-3 py-2 text-sm" type="date" name="end_date" required />
+        <textarea class="w-full border rounded px-3 py-2 text-sm" name="description_md" rows="3" placeholder="描述"></textarea>
+        <input class="w-full border rounded px-3 py-2 text-sm" name="tags" placeholder="标签，以逗号分隔" />
+        <button class="w-full bg-slate-900 text-white py-2 rounded text-sm">保存</button>
+      </form>
+
+      <form class="bg-white p-5 rounded border border-slate-200 shadow-sm space-y-4" method="post" action="/milestones">
+        <div class="text-base font-semibold">新增里程碑</div>
+        <select class="w-full border rounded px-3 py-2 text-sm" name="goal_id">
+          {% for goal in goals %}
+            <option value="{{ goal.id }}">{{ goal.title }}</option>
+          {% endfor %}
+        </select>
+        <input class="w-full border rounded px-3 py-2 text-sm" name="title" placeholder="里程碑标题" required />
+        <input class="w-full border rounded px-3 py-2 text-sm" type="date" name="due_date" required />
+        <select class="w-full border rounded px-3 py-2 text-sm" name="status">
+          <option value="pending">pending</option>
+          <option value="completed">completed</option>
+        </select>
+        <button class="w-full bg-slate-900 text-white py-2 rounded text-sm">保存</button>
+      </form>
+    </div>
+  </div>
+{% endblock %}

@@ -1,0 +1,22 @@
+<div class="border border-slate-200 rounded p-4 text-sm">
+  <div class="text-base font-semibold">{{ review.title }}</div>
+  <div class="mt-2 text-slate-600 whitespace-pre-line">{{ review.narrative }}</div>
+  <div class="mt-4 grid grid-cols-2 gap-2 text-xs text-slate-500">
+    <div>完成率: {{ (review.completion_rate * 100) | round(0) }}%</div>
+    <div>活跃天数: {{ review.active_days }}</div>
+    <div>完成数: {{ review.completed_items }}</div>
+    <div>计划总数: {{ review.total_items }}</div>
+  </div>
+  <div class="mt-4">
+    <div class="font-semibold text-xs">TOP 习惯</div>
+    <div class="text-xs text-slate-600">
+      {% if review.top_habits %}
+        {% for habit in review.top_habits %}
+          <div>{{ habit[0] }} · {{ habit[1] }} 次</div>
+        {% endfor %}
+      {% else %}
+        <div>无</div>
+      {% endif %}
+    </div>
+  </div>
+</div>

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block page_title %}Settings{% endblock %}
+{% block content %}
+  <div class="grid lg:grid-cols-2 gap-8">
+    <form class="bg-white p-5 rounded border border-slate-200 shadow-sm space-y-4" method="post" action="/settings/periods">
+      <div class="text-base font-semibold">时段配置</div>
+      <div class="text-xs text-slate-500">用逗号分隔时段名称，例如 morning, afternoon, evening</div>
+      <input class="w-full border rounded px-3 py-2 text-sm" name="periods" value="{{ periods|join(', ') }}" />
+      <button class="bg-slate-900 text-white px-4 py-2 rounded text-sm">保存</button>
+    </form>
+    <div class="bg-white p-5 rounded border border-slate-200 shadow-sm space-y-4">
+      <div class="text-base font-semibold">导出</div>
+      <div class="space-y-2 text-sm">
+        <a class="text-blue-600" href="/export/json">导出 JSON</a>
+        <div>
+          <a class="text-blue-600" href="/export/markdown?scope=daily&date_value={{ request.query_params.get('date', '') }}">导出单日 Markdown</a>
+        </div>
+        <div>
+          <a class="text-blue-600" href="/export/markdown?scope=monthly&year={{ request.query_params.get('year', '') }}&month={{ request.query_params.get('month', '') }}">导出月度 Markdown</a>
+        </div>
+        <div>
+          <a class="text-blue-600" href="/export/markdown?scope=yearly&year={{ request.query_params.get('year', '') }}">导出年度 Markdown</a>
+        </div>
+      </div>
+    </div>
+    <form class="bg-white p-5 rounded border border-slate-200 shadow-sm space-y-4" method="post" action="/import/json">
+      <div class="text-base font-semibold">导入 JSON</div>
+      <select class="w-full border rounded px-3 py-2 text-sm" name="mode">
+        <option value="overwrite">覆盖导入</option>
+        <option value="merge">合并导入</option>
+      </select>
+      <textarea class="w-full border rounded px-3 py-2 text-sm" name="content" rows="8" placeholder="粘贴 JSON 内容"></textarea>
+      <button class="bg-slate-900 text-white px-4 py-2 rounded text-sm">导入</button>
+      <div id="import-result" class="text-sm"></div>
+    </form>
+  </div>
+{% endblock %}

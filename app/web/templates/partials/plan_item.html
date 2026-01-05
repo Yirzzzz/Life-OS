@@ -1,0 +1,37 @@
+<div class="plan-item flex items-center justify-between border border-slate-200 rounded px-3 py-2 text-sm">
+  <div class="flex-1">
+    <div class="{% if item.completed_at %}line-through text-slate-400{% endif %}">{{ item.title }}</div>
+    {% if item.note %}
+      <div class="mt-1 text-xs text-slate-500">{{ item.note }}</div>
+    {% endif %}
+  </div>
+  <div class="flex items-center gap-2">
+  <form
+    hx-post="/plans/items/{{ item.id }}/toggle"
+    hx-target="closest .plan-item"
+    hx-swap="outerHTML"
+  >
+    <input type="hidden" name="completed" value="{{ false if item.completed_at else true }}" />
+    <button class="text-xs px-3 py-1 border rounded {% if item.completed_at %}bg-emerald-50{% endif %}">
+      {{ "已完成" if item.completed_at else "标记完成" }}
+    </button>
+  </form>
+    <button
+      class="text-xs px-3 py-1 border rounded"
+      hx-get="/plans/items/{{ item.id }}/edit"
+      hx-target="closest .plan-item"
+      hx-swap="outerHTML"
+    >
+      Edit
+    </button>
+    <button
+      class="text-xs px-3 py-1 border rounded text-rose-600 border-rose-200"
+      hx-post="/plans/items/{{ item.id }}/delete"
+      hx-target="closest .plan-item"
+      hx-swap="outerHTML"
+      hx-confirm="Confirm delete Plan &quot;{{ item.title }}&quot;? This action cannot be undone."
+    >
+      Delete
+    </button>
+  </div>
+</div>

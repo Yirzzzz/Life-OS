@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block page_title %}Reviews{% endblock %}
+{% block content %}
+  <div class="grid lg:grid-cols-2 gap-8">
+    <div class="bg-white p-5 rounded border border-slate-200 shadow-sm">
+      <div class="text-base font-semibold">月度复盘</div>
+      <form class="mt-3 flex items-center gap-2" hx-post="/reviews/monthly" hx-target="#monthly-review" hx-indicator="#hx-indicator">
+        <input class="border rounded px-2 py-1 text-sm" type="number" name="year" value="{{ year }}" />
+        <input class="border rounded px-2 py-1 text-sm" type="number" name="month" value="{{ month }}" min="1" max="12" />
+        <button class="px-3 py-1 border rounded text-sm">生成</button>
+        <a class="text-xs text-blue-600" href="/export/markdown?scope=monthly&year={{ year }}&month={{ month }}">导出 Markdown</a>
+      </form>
+      <div id="monthly-review" class="mt-4"></div>
+    </div>
+    <div class="bg-white p-5 rounded border border-slate-200 shadow-sm">
+      <div class="text-base font-semibold">年度复盘</div>
+      <form class="mt-3 flex items-center gap-2" hx-post="/reviews/yearly" hx-target="#yearly-review" hx-indicator="#hx-indicator">
+        <input class="border rounded px-2 py-1 text-sm" type="number" name="year" value="{{ year }}" />
+        <button class="px-3 py-1 border rounded text-sm">生成</button>
+        <a class="text-xs text-blue-600" href="/export/markdown?scope=yearly&year={{ year }}">导出 Markdown</a>
+      </form>
+      <div id="yearly-review" class="mt-4"></div>
+    </div>
+  </div>
+{% endblock %}

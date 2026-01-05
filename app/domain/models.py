@@ -1,0 +1,97 @@
+from __future__ import annotations
+
+from datetime import date, datetime
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy import Column, JSON, Text
+from sqlmodel import Field, SQLModel
+
+
+class Goal(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    type: str
+    title: str
+    start_date: date
+    end_date: date
+    description_md: str = Field(default="", sa_column=Column(Text))
+    tags: List[str] = Field(default_factory=list, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class Milestone(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    goal_id: int = Field(foreign_key="goal.id")
+    title: str
+    due_date: date
+    status: str = "pending"
+
+
+class Habit(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str
+    frequency: str
+    target_per_week: int = 7
+    preferred_period: str = "morning"
+    active: bool = True
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class DailyPlan(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    date: date
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class PlanItem(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    daily_plan_id: int = Field(foreign_key="dailyplan.id")
+    title: str
+    linked_goal_id: Optional[int] = Field(default=None, foreign_key="goal.id")
+    linked_habit_id: Optional[int] = Field(default=None, foreign_key="habit.id")
+    status: str = "pending"
+    completed_at: Optional[datetime] = None
+    note: str = ""
+
+
+class DayLog(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    date: date
+    period_entries: List[Dict[str, Any]] = Field(
+        default_factory=list, sa_column=Column(JSON)
+    )
+    journal_md: str = Field(default="", sa_column=Column(Text))
+    tags: List[str] = Field(default_factory=list, sa_column=Column(JSON))
+
+
+class Suggestion(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    habit_id: int = Field(foreign_key="habit.id")
+    type: str
+    reason: str
+    metrics_json: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    status: str = "open"
+
+
+class SuggestionDecision(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    suggestion_id: int = Field(foreign_key="suggestion.id")
+    decision: str
+    note: str = ""
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class AgentRunLog(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    skill_name: str
+    input_json: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    output_json: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    status: str
+    error: str = ""
+    duration_ms: int = 0
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class Settings(SQLModel, table=True):
+    id: int = Field(default=1, primary_key=True)
+    periods_json: List[str] = Field(default_factory=list, sa_column=Column(JSON))

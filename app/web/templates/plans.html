@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block page_title %}Plans{% endblock %}
+{% block content %}
+  <div class="grid lg:grid-cols-3 gap-8">
+    <div class="lg:col-span-2 space-y-6">
+      <div class="bg-white p-5 rounded border border-slate-200 shadow-sm">
+        <div class="flex items-center justify-between">
+          <div class="text-base font-semibold">每日计划</div>
+          <input class="border rounded px-2 py-1 text-sm" type="date" value="{{ selected_date }}" onchange="location.href='/plans?target_date=' + this.value" />
+        </div>
+        <div class="mt-4 space-y-3" id="plan-list">
+          {% if plan_items %}
+            {% for item in plan_items %}
+              {% include "partials/plan_item.html" %}
+            {% endfor %}
+          {% else %}
+            <div class="text-sm text-slate-500">暂无计划项</div>
+          {% endif %}
+        </div>
+      </div>
+      <form class="bg-white p-5 rounded border border-slate-200 shadow-sm space-y-4" method="post" action="/plans/items">
+        <div class="text-base font-semibold">添加计划项</div>
+        <input type="hidden" name="date_value" value="{{ selected_date }}" />
+        <input class="w-full border rounded px-3 py-2 text-sm" name="title" placeholder="计划内容" required />
+        <select class="w-full border rounded px-3 py-2 text-sm" name="linked_goal_id">
+          <option value="">关联目标（可选）</option>
+          {% for goal in goals %}
+            <option value="{{ goal.id }}">{{ goal.title }}</option>
+          {% endfor %}
+        </select>
+        <select class="w-full border rounded px-3 py-2 text-sm" name="linked_habit_id">
+          <option value="">关联习惯（可选）</option>
+          {% for habit in habits %}
+            <option value="{{ habit.id }}">{{ habit.title }}</option>
+          {% endfor %}
+        </select>
+        <input class="w-full border rounded px-3 py-2 text-sm" name="note" placeholder="备注" />
+        <button class="w-full bg-slate-900 text-white py-2 rounded text-sm">保存</button>
+      </form>
+    </div>
+    <div class="space-y-6">
+      <div class="bg-white p-5 rounded border border-slate-200 shadow-sm">
+        <div class="text-base font-semibold">例行计划</div>
+        <div class="mt-3 space-y-2">
+          {% for habit in habits %}
+            <div class="flex items-center justify-between text-sm">
+              <div>{{ habit.title }}</div>
+              <div class="text-xs text-slate-500">{{ habit.frequency }} · {{ habit.preferred_period }}</div>
+            </div>
+          {% endfor %}
+          {% if not habits %}
+            <div class="text-sm text-slate-500">暂无习惯</div>
+          {% endif %}
+        </div>
+      </div>
+      <form class="bg-white p-5 rounded border border-slate-200 shadow-sm space-y-4" method="post" action="/habits">
+        <div class="text-base font-semibold">新增习惯</div>
+        <input class="w-full border rounded px-3 py-2 text-sm" name="title" placeholder="习惯标题" required />
+        <select class="w-full border rounded px-3 py-2 text-sm" name="frequency">
+          <option value="daily">daily</option>
+          <option value="weekly">weekly</option>
+        </select>
+        <input class="w-full border rounded px-3 py-2 text-sm" name="target_per_week" type="number" min="1" max="7" value="5" />
+        <select class="w-full border rounded px-3 py-2 text-sm" name="preferred_period">
+          <option value="morning">morning</option>
+          <option value="afternoon">afternoon</option>
+          <option value="evening">evening</option>
+        </select>
+        <button class="w-full bg-slate-900 text-white py-2 rounded text-sm">保存</button>
+      </form>
+    </div>
+  </div>
+{% endblock %}

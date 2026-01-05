@@ -1,0 +1,32 @@
+{% if logs %}
+  <div class="overflow-x-auto">
+    <table class="min-w-full text-sm">
+      <thead class="text-left text-slate-500">
+        <tr>
+          <th class="py-2 pr-4">日期</th>
+          <th class="py-2 pr-4">时段摘要</th>
+          <th class="py-2 pr-4">标签</th>
+          <th class="py-2">操作</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {% for log in logs %}
+          <tr>
+            <td class="py-2 pr-4">{{ log.date }}</td>
+            <td class="py-2 pr-4">
+              {% for entry in log.period_entries %}
+                <div class="text-xs text-slate-600">{{ entry.period }}: {{ entry.text[:30] }}</div>
+              {% endfor %}
+            </td>
+            <td class="py-2 pr-4 text-xs text-slate-500">{{ log.tags|join(", ") }}</td>
+            <td class="py-2">
+              <a class="text-blue-600 text-xs" href="/logs?target_date={{ log.date }}">查看</a>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <div class="text-sm text-slate-500">暂无日志</div>
+{% endif %}
