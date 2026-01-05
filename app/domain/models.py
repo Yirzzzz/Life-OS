@@ -26,7 +26,8 @@ class Milestone(SQLModel, table=True):
     status: str = "pending"
 
 
-class Habit(SQLModel, table=True):
+class HabitTemplate(SQLModel, table=True):
+    __tablename__ = "habit"
     id: Optional[int] = Field(default=None, primary_key=True)
     title: str
     frequency: str
@@ -42,12 +43,26 @@ class DailyPlan(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class ShortTermObjective(SQLModel, table=True):
+    __tablename__ = "short_term_objective"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str
+    linked_goal_id: int = Field(foreign_key="goal.id")
+    due_date: date
+    status: str = "pending"
+    note: str = ""
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class PlanItem(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     daily_plan_id: int = Field(foreign_key="dailyplan.id")
     title: str
     linked_goal_id: Optional[int] = Field(default=None, foreign_key="goal.id")
     linked_habit_id: Optional[int] = Field(default=None, foreign_key="habit.id")
+    linked_objective_id: Optional[int] = Field(
+        default=None, foreign_key="short_term_objective.id"
+    )
     status: str = "pending"
     completed_at: Optional[datetime] = None
     note: str = ""

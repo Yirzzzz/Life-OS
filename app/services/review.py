@@ -5,7 +5,7 @@ from typing import Dict, List, Tuple
 
 from sqlmodel import Session, select
 
-from app.domain.models import DayLog, DailyPlan, Habit, PlanItem
+from app.domain.models import DayLog, DailyPlan, HabitTemplate, PlanItem
 
 
 def _month_range(year: int, month: int) -> Tuple[date, date]:
@@ -44,7 +44,7 @@ def _top_habits(session: Session, plan_ids: List[int]) -> List[Tuple[str, int]]:
             counts[item.linked_habit_id] = counts.get(item.linked_habit_id, 0) + 1
     if not counts:
         return []
-    habits = session.exec(select(Habit).where(Habit.id.in_(counts.keys()))).all()
+    habits = session.exec(select(HabitTemplate).where(HabitTemplate.id.in_(counts.keys()))).all()
     name_map = {habit.id: habit.title for habit in habits}
     scored = [(name_map.get(hid, f"Habit {hid}"), count) for hid, count in counts.items()]
     scored.sort(key=lambda x: x[1], reverse=True)

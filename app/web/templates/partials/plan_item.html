@@ -29,9 +29,9 @@
       hx-post="/plans/items/{{ item.id }}/delete"
       hx-target="closest .plan-item"
       hx-swap="outerHTML"
-      hx-confirm="Confirm delete Plan &quot;{{ item.title }}&quot;? This action cannot be undone."
+      hx-confirm="{% if item.linked_habit_id %}Confirm delete Habit &quot;{{ item.title }}&quot;? This will stop future weekly/daily generation.{% else %}Confirm delete Plan &quot;{{ item.title }}&quot;? This action cannot be undone.{% endif %}"
     >
-      Delete
+      {% if item.linked_habit_id %}Delete habit{% else %}Delete{% endif %}
     </button>
   </div>
 </div>

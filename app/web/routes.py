@@ -14,9 +14,10 @@ from app.domain.models import (
     DayLog,
     DailyPlan,
     Goal,
-    Habit,
+    HabitTemplate,
     Milestone,
     PlanItem,
+    ShortTermObjective,
     Settings,
     Suggestion,
     SuggestionDecision,
@@ -59,6 +60,105 @@ def _ensure_day_log(session: Session, target_date: date) -> DayLog:
         session.commit()
         session.refresh(log)
     return log
+
+
+def _ensure_daily_plan(session: Session, target_date: date) -> DailyPlan:
+    plan = session.exec(select(DailyPlan).where(DailyPlan.date == target_date)).first()
+    if not plan:
+        plan = DailyPlan(date=target_date)
+        session.add(plan)
+        session.commit()
+        session.refresh(plan)
+    return plan
+
+
+def _template_included(template: HabitTemplate, target_date: date) -> bool:
+    if not template.active:
+        return False
+    if template.frequency == "daily":
+        return True
+    if template.frequency == "weekly":
+        return True
+    return True
+
+
+def _week_start(target_date: date) -> date:
+    return target_date - timedelta(days=target_date.weekday())
+
+
+def _sync_plan_items(session: Session, plan: DailyPlan) -> None:
+    items = session.exec(select(PlanItem).where(PlanItem.daily_plan_id == plan.id)).all()
+    existing_habit_ids = {item.linked_habit_id for item in items if item.linked_habit_id}
+    existing_objective_ids = {
+        item.linked_objective_id for item in items if item.linked_objective_id
+    }
+    changed = False
+
+    templates = session.exec(
+        select(HabitTemplate).where(HabitTemplate.active == True)  # noqa: E712
+    ).all()
+    week_start = _week_start(plan.date)
+    week_end = week_start + timedelta(days=6)
+    for template in templates:
+        if not _template_included(template, plan.date):
+            continue
+        if template.id in existing_habit_ids:
+            continue
+        completed_at = None
+        status = "pending"
+        if template.frequency == "weekly":
+            completed_item = session.exec(
+                select(PlanItem)
+                .join(DailyPlan, PlanItem.daily_plan_id == DailyPlan.id)
+                .where(
+                    PlanItem.linked_habit_id == template.id,
+                    PlanItem.completed_at.is_not(None),
+                    DailyPlan.date >= week_start,
+                    DailyPlan.date <= week_end,
+                )
+            ).first()
+            if completed_item:
+                status = "completed"
+                completed_at = completed_item.completed_at
+        session.add(
+            PlanItem(
+                daily_plan_id=plan.id,
+                title=template.title,
+                linked_habit_id=template.id,
+                status=status,
+                completed_at=completed_at,
+            )
+        )
+        changed = True
+
+    objectives = session.exec(
+        select(ShortTermObjective).where(ShortTermObjective.status != "completed")
+    ).all()
+    for obj in objectives:
+        if obj.status == "pending" and obj.due_date < plan.date:
+            obj.status = "expired"
+            session.add(obj)
+            changed = True
+    for obj in objectives:
+        if obj.status != "pending":
+            continue
+        if obj.due_date < plan.date:
+            continue
+        if obj.id in existing_objective_ids:
+            continue
+        session.add(
+            PlanItem(
+                daily_plan_id=plan.id,
+                title=obj.title,
+                linked_goal_id=obj.linked_goal_id,
+                linked_objective_id=obj.id,
+                status="pending",
+            )
+        )
+        changed = True
+
+    if changed:
+        session.commit()
 
 
 def _build_period_rows(log: DayLog, periods: List[str]) -> List[Dict[str, str]]:
@@ -112,12 +212,11 @@ def dashboard(request: Request) -> Response:
     periods = _get_periods(session)
     log = _ensure_day_log(session, today)
     period_rows = _build_period_rows(log, periods)
-    plan = session.exec(select(DailyPlan).where(DailyPlan.date == today)).first()
-    items = []
-    if plan:
-        items = session.exec(select(PlanItem).where(PlanItem.daily_plan_id == plan.id)).all()
+    plan = _ensure_daily_plan(session, today)
+    _sync_plan_items(session, plan)
+    items = session.exec(select(PlanItem).where(PlanItem.daily_plan_id == plan.id)).all()
     completed = len([item for item in items if item.completed_at])
-    habits = session.exec(select(Habit).where(Habit.active == True)).all()  # noqa: E712
+    habits = session.exec(select(HabitTemplate).where(HabitTemplate.active == True)).all()  # noqa: E712
     suggestions = session.exec(select(Suggestion).where(Suggestion.status == "open")).all()
 
     overload = False
@@ -292,11 +391,10 @@ def create_milestone(
 def plans(request: Request, target_date: Optional[str] = None) -> Response:
     session = _get_session(request)
     selected_date = _parse_date(target_date, _today())
-    plan = session.exec(select(DailyPlan).where(DailyPlan.date == selected_date)).first()
-    items: List[PlanItem] = []
-    if plan:
-        items = session.exec(select(PlanItem).where(PlanItem.daily_plan_id == plan.id)).all()
-    habits = session.exec(select(Habit).where(Habit.active == True)).all()  # noqa: E712
+    plan = _ensure_daily_plan(session, selected_date)
+    _sync_plan_items(session, plan)
+    items = session.exec(select(PlanItem).where(PlanItem.daily_plan_id == plan.id)).all()
+    habits = session.exec(select(HabitTemplate).where(HabitTemplate.active == True)).all()  # noqa: E712
     goals_list = session.exec(select(Goal)).all()
     return templates.TemplateResponse(
         "plans.html",
@@ -315,31 +413,49 @@ def create_plan_item(
     request: Request,
     date_value: str = Form(...),
     title: str = Form(...),
-    linked_goal_id: Optional[int] = Form(None),
-    linked_habit_id: Optional[int] = Form(None),
+    linked_goal_id: int = Form(...),
+    due_date: str = Form(...),
+    status: str = Form("pending"),
     note: str = Form(""),
 ) -> Response:
     session = _get_session(request)
-    executor = _get_executor(request)
-    payload = {
-        "date": _parse_date(date_value, _today()),
-        "items": [
-            {
-                "title": title,
-                "linked_goal_id": linked_goal_id,
-                "linked_habit_id": linked_habit_id,
-                "note": note,
-            }
-        ],
-    }
-    try:
-        executor.execute(session, "plan.create_or_update_daily", payload)
-    except RuntimeError as exc:
-        return templates.TemplateResponse(
-            "partials/error.html",
-            {"request": request, "message": str(exc), "retry": "/plans"},
-            status_code=400,
+    objective = ShortTermObjective(
+        title=title,
+        linked_goal_id=linked_goal_id,
+        due_date=_parse_date(due_date, _today()),
+        status=status,
+        note=note,
+    )
+    session.add(objective)
+    session.commit()
+    session.refresh(objective)
+    plan_date = _parse_date(date_value, _today())
+    plan = _ensure_daily_plan(session, plan_date)
+    _sync_plan_items(session, plan)
+    return Response(status_code=303, headers={"Location": f"/plans?target_date={date_value}"})
+
+
+@router.post("/plans/items/daily", response_class=HTMLResponse)
+def create_daily_item(
+    request: Request,
+    date_value: str = Form(...),
+    title: str = Form(...),
+    linked_goal_id: Optional[int] = Form(None),
+    note: str = Form(""),
+) -> Response:
+    session = _get_session(request)
+    plan_date = _parse_date(date_value, _today())
+    plan = _ensure_daily_plan(session, plan_date)
+    session.add(
+        PlanItem(
+            daily_plan_id=plan.id,
+            title=title,
+            linked_goal_id=linked_goal_id,
+            note=note,
+            status="pending",
         )
+    )
+    session.commit()
     return Response(status_code=303, headers={"Location": f"/plans?target_date={date_value}"})
 
 
@@ -389,10 +505,14 @@ def edit_plan_item(request: Request, item_id: int) -> Response:
     if not item:
         return Response(status_code=404)
     goals_list = session.exec(select(Goal)).all()
-    habits = session.exec(select(Habit).where(Habit.active == True)).all()  # noqa: E712
+    objective = None
+    if item.linked_objective_id:
+        objective = session.exec(
+            select(ShortTermObjective).where(ShortTermObjective.id == item.linked_objective_id)
+        ).first()
     return templates.TemplateResponse(
         "partials/plan_item_edit.html",
-        {"request": request, "item": item, "goals": goals_list, "habits": habits},
+        {"request": request, "item": item, "goals": goals_list, "objective": objective},
     )
 
 
@@ -402,16 +522,33 @@ def update_plan_item(
     item_id: int,
     title: str = Form(...),
     linked_goal_id: Optional[int] = Form(None),
-    linked_habit_id: Optional[int] = Form(None),
+    due_date: Optional[str] = Form(None),
+    status: Optional[str] = Form(None),
     note: str = Form(""),
 ) -> Response:
     session = _get_session(request)
     item = session.exec(select(PlanItem).where(PlanItem.id == item_id)).first()
     if not item:
         return Response(status_code=404)
-    item.title = title
-    item.linked_goal_id = linked_goal_id
-    item.linked_habit_id = linked_habit_id
+    if item.linked_objective_id:
+        objective = session.exec(
+            select(ShortTermObjective).where(ShortTermObjective.id == item.linked_objective_id)
+        ).first()
+        if objective:
+            objective.title = title
+            if linked_goal_id is not None:
+                objective.linked_goal_id = linked_goal_id
+            if due_date:
+                objective.due_date = _parse_date(due_date, objective.due_date)
+            if status:
+                objective.status = status
+            objective.note = note
+            session.add(objective)
+            item.title = objective.title
+            item.linked_goal_id = objective.linked_goal_id
+    else:
+        item.title = title
+        item.linked_goal_id = linked_goal_id
     item.note = note
     session.add(item)
     session.commit()
@@ -427,6 +564,27 @@ def delete_plan_item(request: Request, item_id: int) -> Response:
     item = session.exec(select(PlanItem).where(PlanItem.id == item_id)).first()
     if not item:
         return Response(status_code=404)
+    if item.linked_habit_id:
+        template = session.exec(
+            select(HabitTemplate).where(HabitTemplate.id == item.linked_habit_id)
+        ).first()
+        if template:
+            template.active = False
+            session.add(template)
+            future_items = session.exec(
+                select(PlanItem)
+                .join(DailyPlan, PlanItem.daily_plan_id == DailyPlan.id)
+                .where(
+                    PlanItem.linked_habit_id == template.id,
+                    DailyPlan.date >= _today(),
+                )
+            ).all()
+            for future_item in future_items:
+                session.delete(future_item)
+            if item not in future_items:
+                session.delete(item)
+            session.commit()
+            return Response(content="")
     session.delete(item)
     session.commit()
     return Response(content="")
@@ -457,6 +615,8 @@ def create_habit(
             {"request": request, "message": str(exc), "retry": "/plans"},
             status_code=400,
         )
+    plan = _ensure_daily_plan(session, _today())
+    _sync_plan_items(session, plan)
     return Response(status_code=303, headers={"Location": "/plans"})
 
 
@@ -465,10 +625,9 @@ def logs(request: Request, target_date: Optional[str] = None) -> Response:
     session = _get_session(request)
     selected_date, used_fallback = _parse_date_with_notice(target_date, _today())
     log = _ensure_day_log(session, selected_date)
-    plan = session.exec(select(DailyPlan).where(DailyPlan.date == selected_date)).first()
-    items: List[PlanItem] = []
-    if plan:
-        items = session.exec(select(PlanItem).where(PlanItem.daily_plan_id == plan.id)).all()
+    plan = _ensure_daily_plan(session, selected_date)
+    _sync_plan_items(session, plan)
+    items = session.exec(select(PlanItem).where(PlanItem.daily_plan_id == plan.id)).all()
     periods = _get_periods(session)
     journal_html = markdown.markdown(log.journal_md) if log else ""
     period_rows = _build_period_rows(log, periods)
@@ -590,7 +749,7 @@ def align_log(request: Request, date_value: str = Form(...)) -> Response:
     items: List[PlanItem] = []
     if plan:
         items = session.exec(select(PlanItem).where(PlanItem.daily_plan_id == plan.id)).all()
-    habits = session.exec(select(Habit)).all()
+    habits = session.exec(select(HabitTemplate)).all()
 
     suggestions: List[Dict[str, Any]] = []
     if log:

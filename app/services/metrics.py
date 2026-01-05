@@ -5,14 +5,14 @@ from typing import Dict, List, Tuple
 
 from sqlmodel import Session, select
 
-from app.domain.models import Habit, PlanItem, DailyPlan
+from app.domain.models import HabitTemplate, PlanItem, DailyPlan
 
 
 def _date_range(end_date: date, days: int) -> List[date]:
     return [end_date - timedelta(days=offset) for offset in range(days)]
 
 
-def habit_metrics(session: Session, habit: Habit, end_date: date) -> Dict[str, int]:
+def habit_metrics(session: Session, habit: HabitTemplate, end_date: date) -> Dict[str, int]:
     dates = _date_range(end_date, 30)
     plan_ids = session.exec(
         select(DailyPlan.id).where(DailyPlan.date.in_(dates))
@@ -73,7 +73,7 @@ def habit_metrics(session: Session, habit: Habit, end_date: date) -> Dict[str, i
 
 
 def habit_preferred_period(
-    session: Session, habit: Habit, end_date: date
+    session: Session, habit: HabitTemplate, end_date: date
 ) -> Tuple[str, int]:
     dates = _date_range(end_date, 30)
     plan_ids = session.exec(

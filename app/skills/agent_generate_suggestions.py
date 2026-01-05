@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.agent.base import Skill
-from app.domain.models import Habit, Suggestion
+from app.domain.models import HabitTemplate, Suggestion
 from app.services.metrics import habit_metrics, habit_preferred_period
 
 
@@ -28,7 +28,9 @@ class AgentGenerateSuggestionsSkill(Skill):
 
     def run(self, data: AgentSuggestionInput, context: dict) -> AgentSuggestionOutput:
         session: Session = context["session"]
-        habits = session.exec(select(Habit).where(Habit.active == True)).all()  # noqa: E712
+        habits = session.exec(
+            select(HabitTemplate).where(HabitTemplate.active == True)  # noqa: E712
+        ).all()
         created = 0
         suggestion_ids: List[int] = []
         for habit in habits:

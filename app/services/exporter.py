@@ -6,7 +6,18 @@ from typing import Dict, List
 
 from sqlmodel import Session, select
 
-from app.domain.models import DayLog, DailyPlan, Goal, Habit, Milestone, PlanItem, Settings, Suggestion, SuggestionDecision
+from app.domain.models import (
+    DayLog,
+    DailyPlan,
+    Goal,
+    HabitTemplate,
+    Milestone,
+    PlanItem,
+    Settings,
+    ShortTermObjective,
+    Suggestion,
+    SuggestionDecision,
+)
 from app.services.review import generate_monthly_review, generate_yearly_review
 
 
@@ -14,7 +25,8 @@ def export_json(session: Session) -> Dict[str, object]:
     return {
         "goals": session.exec(select(Goal)).all(),
         "milestones": session.exec(select(Milestone)).all(),
-        "habits": session.exec(select(Habit)).all(),
+        "habits": session.exec(select(HabitTemplate)).all(),
+        "objectives": session.exec(select(ShortTermObjective)).all(),
         "daily_plans": session.exec(select(DailyPlan)).all(),
         "plan_items": session.exec(select(PlanItem)).all(),
         "day_logs": session.exec(select(DayLog)).all(),

@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.agent.base import Skill
-from app.domain.models import Habit
+from app.domain.models import HabitTemplate
 
 
 class HabitInput(BaseModel):
@@ -25,18 +25,18 @@ class HabitOutput(BaseModel):
 
 class HabitCreateOrUpdateSkill(Skill):
     name = "habit.create_or_update"
-    description = "Create or update habit."
+    description = "Create or update habit template."
     input_schema = HabitInput
     output_schema = HabitOutput
 
     def run(self, data: HabitInput, context: dict) -> HabitOutput:
         session: Session = context["session"]
         if data.id:
-            habit = session.exec(select(Habit).where(Habit.id == data.id)).first()
+            habit = session.exec(select(HabitTemplate).where(HabitTemplate.id == data.id)).first()
             if not habit:
                 raise ValueError("Habit not found")
         else:
-            habit = Habit(title=data.title, frequency=data.frequency)
+            habit = HabitTemplate(title=data.title, frequency=data.frequency)
         habit.title = data.title
         habit.frequency = data.frequency
         habit.target_per_week = data.target_per_week

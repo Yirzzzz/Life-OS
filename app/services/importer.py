@@ -8,10 +8,11 @@ from app.domain.models import (
     DayLog,
     DailyPlan,
     Goal,
-    Habit,
+    HabitTemplate,
     Milestone,
     PlanItem,
     Settings,
+    ShortTermObjective,
     Suggestion,
     SuggestionDecision,
 )
@@ -20,7 +21,8 @@ from app.domain.models import (
 MODEL_MAP: Dict[str, Type] = {
     "goals": Goal,
     "milestones": Milestone,
-    "habits": Habit,
+    "habits": HabitTemplate,
+    "objectives": ShortTermObjective,
     "daily_plans": DailyPlan,
     "plan_items": PlanItem,
     "day_logs": DayLog,

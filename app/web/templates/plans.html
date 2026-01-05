@@ -18,24 +18,32 @@
           {% endif %}
         </div>
       </div>
-      <form class="bg-white p-5 rounded border border-slate-200 shadow-sm space-y-4" method="post" action="/plans/items">
-        <div class="text-base font-semibold">添加计划项</div>
+      <form class="bg-white p-5 rounded border border-slate-200 shadow-sm space-y-4" method="post" action="/plans/items/daily">
+        <div class="text-base font-semibold">Add daily item</div>
         <input type="hidden" name="date_value" value="{{ selected_date }}" />
-        <input class="w-full border rounded px-3 py-2 text-sm" name="title" placeholder="计划内容" required />
+        <input class="w-full border rounded px-3 py-2 text-sm" name="title" placeholder="Daily item title" required />
         <select class="w-full border rounded px-3 py-2 text-sm" name="linked_goal_id">
-          <option value="">关联目标（可选）</option>
+          <option value="">Link goal (optional)</option>
           {% for goal in goals %}
             <option value="{{ goal.id }}">{{ goal.title }}</option>
           {% endfor %}
         </select>
-        <select class="w-full border rounded px-3 py-2 text-sm" name="linked_habit_id">
-          <option value="">关联习惯（可选）</option>
-          {% for habit in habits %}
-            <option value="{{ habit.id }}">{{ habit.title }}</option>
+        <input class="w-full border rounded px-3 py-2 text-sm" name="note" placeholder="Note" />
+        <button class="w-full bg-slate-900 text-white py-2 rounded text-sm">Save</button>
+      </form>
+      <form class="bg-white p-5 rounded border border-slate-200 shadow-sm space-y-4" method="post" action="/plans/items">
+        <div class="text-base font-semibold">Add short-term objective</div>
+        <input type="hidden" name="date_value" value="{{ selected_date }}" />
+        <input class="w-full border rounded px-3 py-2 text-sm" name="title" placeholder="Objective title" required />
+        <select class="w-full border rounded px-3 py-2 text-sm" name="linked_goal_id" required>
+          <option value="" disabled selected>Select goal</option>
+          {% for goal in goals %}
+            <option value="{{ goal.id }}">{{ goal.title }}</option>
           {% endfor %}
         </select>
-        <input class="w-full border rounded px-3 py-2 text-sm" name="note" placeholder="备注" />
-        <button class="w-full bg-slate-900 text-white py-2 rounded text-sm">保存</button>
+        <input class="w-full border rounded px-3 py-2 text-sm" type="date" name="due_date" required />
+        <input class="w-full border rounded px-3 py-2 text-sm" name="note" placeholder="Note" />
+        <button class="w-full bg-slate-900 text-white py-2 rounded text-sm">Save</button>
       </form>
     </div>
     <div class="space-y-6">
