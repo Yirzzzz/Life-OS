@@ -40,12 +40,11 @@
             <input class="border rounded px-2 py-1" type="date" id="filter-start" name="start_date" />
             <input class="border rounded px-2 py-1" type="date" id="filter-end" name="end_date" />
             <input class="border rounded px-2 py-1" type="text" id="filter-tag" name="tag" data-i18n-placeholder="logs.filters.tag" />
-            <input class="border rounded px-2 py-1" type="text" id="filter-plan" name="plan_item" data-i18n-placeholder="logs.filters.plan_item" />
             <button
               class="px-3 py-1 border rounded"
               hx-get="/logs/table"
               hx-target="#log-table"
-              hx-include="#filter-start,#filter-end,#filter-tag,#filter-plan"
+              hx-include="#filter-start,#filter-end,#filter-tag"
               data-i18n="logs.filters.apply"
             ></button>
           </div>

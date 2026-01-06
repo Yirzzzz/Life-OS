@@ -53,6 +53,34 @@
       </div>
 
       <div class="bg-white p-5 rounded shadow-sm border border-slate-200">
+        <div class="text-xs text-slate-500" data-i18n="dashboard.weekly_plan.title"></div>
+        {% if weekly_plan_items %}
+          <div class="mt-2 space-y-2 text-sm">
+            {% for item in weekly_plan_items %}
+              <div class="flex items-center justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="truncate text-slate-700">{{ item.title }}</div>
+                  <div class="text-xs text-slate-500">
+                    {{ item.completed }}/{{ item.target }}
+                    <span class="ml-1 emoji">{{ item.emoji }}</span>
+                  </div>
+                </div>
+                <span
+                  class="shrink-0 rounded-full border border-slate-200 px-2 py-0.5 text-[11px] text-slate-600"
+                  data-i18n="dashboard.weekly_plan.status.{{ item.status }}"
+                ></span>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="mt-2 text-sm text-slate-400" data-i18n="dashboard.weekly_plan.empty"></div>
+        {% endif %}
+        <div class="mt-3 text-sm">
+          <a class="text-blue-600" href="/plans" data-i18n="dashboard.weekly_plan.manage"></a>
+        </div>
+      </div>
+
+      <div class="bg-white p-5 rounded shadow-sm border border-slate-200">
         <div class="text-xs text-slate-500" data-i18n="dashboard.today_log"></div>
         <div class="text-3xl font-semibold flex items-center gap-2">
           <span data-i18n="{{ 'dashboard.log_status.has' if log_has_content else 'dashboard.log_status.empty' }}"></span>
@@ -68,33 +96,33 @@
           <a class="text-blue-600" href="/logs?target_date={{ today }}" data-i18n="dashboard.write_log"></a>
         </div>
       </div>
+    </div>
 
-      <div class="bg-white p-5 rounded shadow-sm border border-slate-200">
-        <div class="text-xs text-slate-500" data-i18n="dashboard.objectives.title"></div>
-        {% if short_term_objectives %}
-          <div class="mt-2 space-y-2 text-sm">
-            {% for obj in short_term_objectives %}
-              {% set obj_title = obj.title.strip() if obj.title else "" %}
-              <div class="flex items-center justify-between gap-2">
-                <div class="truncate text-slate-700">
-                  {% if obj_title %}
-                    {{ obj_title }}
-                  {% else %}
-                    <span class="text-slate-400" data-i18n="dashboard.objectives.untitled"></span>
-                  {% endif %}
-                </div>
-                <div class="shrink-0 text-xs text-slate-500">
-                  {{ obj.due_date }}{% if obj.remaining_days is not none %} <span data-i18n="dashboard.objectives.remaining_days" data-i18n-params='{"days":"{{ obj.remaining_days }}"}'></span>{% endif %}
-                </div>
+    <div class="bg-white p-5 rounded shadow-sm border border-slate-200">
+      <div class="text-base font-semibold" data-i18n="dashboard.objectives.title"></div>
+      {% if short_term_objectives %}
+        <div class="mt-3 space-y-2 text-sm">
+          {% for obj in short_term_objectives %}
+            {% set obj_title = obj.title.strip() if obj.title else "" %}
+            <div class="flex items-center justify-between gap-2">
+              <div class="truncate text-slate-700">
+                {% if obj_title %}
+                  {{ obj_title }}
+                {% else %}
+                  <span class="text-slate-400" data-i18n="dashboard.objectives.untitled"></span>
+                {% endif %}
               </div>
-            {% endfor %}
-          </div>
-        {% else %}
-          <div class="mt-2 text-sm text-slate-400" data-i18n="dashboard.objectives.empty"></div>
-        {% endif %}
-        <div class="mt-3 text-sm">
-          <a class="text-blue-600" href="/plans" data-i18n="dashboard.objectives.manage"></a>
+              <div class="shrink-0 text-xs text-slate-500">
+                {{ obj.due_date }}{% if obj.remaining_days is not none %} <span data-i18n="dashboard.objectives.remaining_days" data-i18n-params='{"days":"{{ obj.remaining_days }}"}'></span>{% endif %}
+              </div>
+            </div>
+          {% endfor %}
         </div>
+      {% else %}
+        <div class="mt-3 text-sm text-slate-400" data-i18n="dashboard.objectives.empty"></div>
+      {% endif %}
+      <div class="mt-3 text-sm">
+        <a class="text-blue-600" href="/plans" data-i18n="dashboard.objectives.manage"></a>
       </div>
     </div>
 

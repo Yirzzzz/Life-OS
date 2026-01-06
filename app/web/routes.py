@@ -433,8 +433,18 @@ def dashboard(request: Request, habit_month: Optional[str] = None) -> Response:
             PlanItem.linked_objective_id.is_(None),
         )
     ).all()
-    completed = len([item for item in items if item.completed_at])
     habits = session.exec(select(HabitTemplate).where(HabitTemplate.active == True)).all()  # noqa: E712
+    habit_by_id = {habit.id: habit for habit in habits}
+    plan_items = [
+        item
+        for item in items
+        if not (
+            item.linked_habit_id
+            and habit_by_id.get(item.linked_habit_id)
+            and habit_by_id[item.linked_habit_id].frequency == "weekly"
+        )
+    ]
+    completed = len([item for item in plan_items if item.completed_at])
     objectives = session.exec(
         select(ShortTermObjective).where(
             ShortTermObjective.status == "pending",
@@ -452,9 +462,51 @@ def dashboard(request: Request, habit_month: Optional[str] = None) -> Response:
     suggestions = session.exec(select(Suggestion).where(Suggestion.status == "open")).all()
     habit_progress = _habit_progress_summary(session, anchor_date)
 
+    weekly_habits = [habit for habit in habits if habit.frequency == "weekly"]
+    weekly_habit_ids = [habit.id for habit in weekly_habits]
+    weekly_plan_items: List[Dict[str, Any]] = []
+    if weekly_habit_ids:
+        week_start = _week_start(today)
+        week_end = week_start + timedelta(days=6)
+        week_plans = session.exec(
+            select(DailyPlan).where(DailyPlan.date >= week_start, DailyPlan.date <= week_end)
+        ).all()
+        plan_ids = [plan.id for plan in week_plans]
+        completed_weekly_ids: set[int] = set()
+        if plan_ids:
+            week_items = session.exec(
+                select(PlanItem).where(
+                    PlanItem.daily_plan_id.in_(plan_ids),
+                    PlanItem.linked_habit_id.in_(weekly_habit_ids),
+                    PlanItem.completed_at.is_not(None),
+                )
+            ).all()
+            completed_weekly_ids = {item.linked_habit_id for item in week_items if item.linked_habit_id}
+        for habit in weekly_habits:
+            target = habit.target_per_week if habit.target_per_week else 1
+            completed_count = 1 if habit.id in completed_weekly_ids else 0
+            if completed_count >= target:
+                status = "completed"
+                emoji = "😁"
+            elif completed_count == 0:
+                status = "not_started"
+                emoji = "😞"
+            else:
+                status = "near" if (completed_count / target) >= 0.8 else "in_progress"
+                emoji = "😊" if status == "near" else "💪"
+            weekly_plan_items.append(
+                {
+                    "title": habit.title,
+                    "completed": completed_count,
+                    "target": target,
+                    "status": status,
+                    "emoji": emoji,
+                }
+            )
+
     overload = False
     overload_reason = ""
-    if len(items) > 8:
+    if len(plan_items) > 8:
         overload = True
         overload_reason = "dashboard.overload.reason.too_many"
     else:
@@ -466,8 +518,17 @@ def dashboard(request: Request, habit_month: Optional[str] = None) -> Response:
         week_items = session.exec(
             select(PlanItem).where(PlanItem.daily_plan_id.in_(plan_ids))
         ).all() if plan_ids else []
-        week_completed = len([item for item in week_items if item.completed_at])
-        week_rate = week_completed / len(week_items) if week_items else 1
+        filtered_week_items = [
+            item
+            for item in week_items
+            if not (
+                item.linked_habit_id
+                and habit_by_id.get(item.linked_habit_id)
+                and habit_by_id[item.linked_habit_id].frequency == "weekly"
+            )
+        ]
+        week_completed = len([item for item in filtered_week_items if item.completed_at])
+        week_rate = week_completed / len(filtered_week_items) if filtered_week_items else 1
         if week_rate < 0.3:
             overload = True
             overload_reason = "dashboard.overload.reason.low_completion"
@@ -477,12 +538,13 @@ def dashboard(request: Request, habit_month: Optional[str] = None) -> Response:
         {
             "request": request,
             "today": today,
-            "plan_items": items,
+            "plan_items": plan_items,
             "completed": completed,
             "habits": habits,
             "log": log,
             "log_has_content": log_has_content,
             "short_term_objectives": short_term_objectives,
+            "weekly_plan_items": weekly_plan_items,
             "suggestions": suggestions,
             "overload": overload,
             "overload_reason": overload_reason,
@@ -936,9 +998,11 @@ def logs(request: Request, target_date: Optional[str] = None) -> Response:
     periods = _get_periods(session)
     journal_html = markdown.markdown(log.journal_md) if log else ""
     period_rows = _build_period_rows(log, periods)
-    recent_start = _today() - timedelta(days=30)
+    recent_start = _today() - timedelta(days=6)
     logs_recent = session.exec(
-        select(DayLog).where(DayLog.date >= recent_start, DayLog.date <= _today())
+        select(DayLog)
+        .where(DayLog.date >= recent_start, DayLog.date <= _today())
+        .order_by(DayLog.date.asc())
     ).all()
     return templates.TemplateResponse(
         "logs.html",
@@ -966,9 +1030,13 @@ def logs_table(
     plan_item: Optional[str] = None,
 ) -> Response:
     session = _get_session(request)
-    start = _parse_date(start_date, _today() - timedelta(days=30))
+    start = _parse_date(start_date, _today() - timedelta(days=6))
     end = _parse_date(end_date, _today())
-    logs = session.exec(select(DayLog).where(DayLog.date >= start, DayLog.date <= end)).all()
+    logs = session.exec(
+        select(DayLog)
+        .where(DayLog.date >= start, DayLog.date <= end)
+        .order_by(DayLog.date.asc())
+    ).all()
 
     filtered: List[DayLog] = []
     for log in logs:
