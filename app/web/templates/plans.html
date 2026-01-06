@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block page_title %}Plans{% endblock %}
+{% block page_title %}<span data-i18n="nav.plans"></span>{% endblock %}
 {% block content %}
   <div class="grid lg:grid-cols-3 gap-8">
     <div class="lg:col-span-2 space-y-6">
       <div class="bg-white p-5 rounded border border-slate-200 shadow-sm">
         <div class="flex items-center justify-between">
-          <div class="text-base font-semibold">每日计划</div>
+          <div class="text-base font-semibold" data-i18n="plans.daily_plan.title"></div>
           <input class="border rounded px-2 py-1 text-sm" type="date" value="{{ selected_date }}" onchange="location.href='/plans?target_date=' + this.value" />
         </div>
         <div class="mt-4 space-y-3" id="plan-list">
@@ -14,55 +14,59 @@
               {% include "partials/plan_item.html" %}
             {% endfor %}
           {% else %}
-            <div class="text-sm text-slate-500">暂无计划项</div>
+            <div class="text-sm text-slate-500" data-i18n="plans.daily_plan.empty"></div>
           {% endif %}
         </div>
       </div>
       <form class="bg-white p-5 rounded border border-slate-200 shadow-sm space-y-4" method="post" action="/plans/items/daily">
-        <div class="text-base font-semibold">Add daily item</div>
+        <div class="text-base font-semibold" data-i18n="plans.daily_item.add"></div>
         <input type="hidden" name="date_value" value="{{ selected_date }}" />
-        <input class="w-full border rounded px-3 py-2 text-sm" name="title" placeholder="Daily item title" required />
+        <input class="w-full border rounded px-3 py-2 text-sm" name="title" data-i18n-placeholder="plans.daily_item.title_placeholder" required />
         <select class="w-full border rounded px-3 py-2 text-sm" name="linked_goal_id">
-          <option value="">Link goal (optional)</option>
+          <option value="" data-i18n="plans.daily_item.goal_optional"></option>
           {% for goal in goals %}
             <option value="{{ goal.id }}">{{ goal.title }}</option>
           {% endfor %}
         </select>
-        <input class="w-full border rounded px-3 py-2 text-sm" name="note" placeholder="Note" />
-        <button class="w-full bg-slate-900 text-white py-2 rounded text-sm">Save</button>
+        <input class="w-full border rounded px-3 py-2 text-sm" name="note" data-i18n-placeholder="plans.daily_item.note_placeholder" />
+        <button class="w-full bg-slate-900 text-white py-2 rounded text-sm" data-i18n="plans.daily_item.save"></button>
       </form>
       <form class="bg-white p-5 rounded border border-slate-200 shadow-sm space-y-4" method="post" action="/plans/items">
-        <div class="text-base font-semibold">Add short-term objective</div>
+        <div class="text-base font-semibold" data-i18n="plans.objective.add"></div>
         <input type="hidden" name="date_value" value="{{ selected_date }}" />
-        <input class="w-full border rounded px-3 py-2 text-sm" name="title" placeholder="Objective title" required />
+        <input class="w-full border rounded px-3 py-2 text-sm" name="title" data-i18n-placeholder="plans.objective.title_placeholder" required />
         <select class="w-full border rounded px-3 py-2 text-sm" name="linked_goal_id" required>
-          <option value="" disabled selected>Select goal</option>
+          <option value="" disabled selected data-i18n="plans.objective.select_goal"></option>
           {% for goal in goals %}
             <option value="{{ goal.id }}">{{ goal.title }}</option>
           {% endfor %}
         </select>
         <input class="w-full border rounded px-3 py-2 text-sm" type="date" name="due_date" required />
-        <input class="w-full border rounded px-3 py-2 text-sm" name="note" placeholder="Note" />
-        <button class="w-full bg-slate-900 text-white py-2 rounded text-sm">Save</button>
+        <input class="w-full border rounded px-3 py-2 text-sm" name="note" data-i18n-placeholder="plans.objective.note_placeholder" />
+        <button class="w-full bg-slate-900 text-white py-2 rounded text-sm" data-i18n="plans.objective.save"></button>
       </form>
     </div>
     <div class="space-y-6">
       <div class="bg-white p-5 rounded border border-slate-200 shadow-sm">
-        <div class="text-base font-semibold">例行计划</div>
+        <div class="text-base font-semibold" data-i18n="plans.habit.title"></div>
         <div class="mt-3 space-y-2">
           {% for habit in habits %}
             <div class="flex items-center justify-between text-sm">
               <div>{{ habit.title }}</div>
-              <div class="text-xs text-slate-500">{{ habit.frequency }} · FROM {{ habit.start_date or '2026-01-01' }}</div>
+              <div
+                class="text-xs text-slate-500"
+                data-i18n="plans.habit.frequency_from"
+                data-i18n-params='{{ {"frequencyKey": "plans.habit.frequency." ~ habit.frequency, "start": (habit.start_date|string) if habit.start_date else "2026-01-01"} | tojson }}'
+              ></div>
             </div>
           {% endfor %}
           {% if not habits %}
-            <div class="text-sm text-slate-500">暂无习惯</div>
+            <div class="text-sm text-slate-500" data-i18n="plans.habit.empty"></div>
           {% endif %}
         </div>
       </div>
       <div class="bg-white p-5 rounded border border-slate-200 shadow-sm">
-        <div class="text-base font-semibold">Short-term objectives</div>
+        <div class="text-base font-semibold" data-i18n="plans.objectives.title"></div>
         <div class="mt-3 space-y-3">
           {% for obj in objectives %}
             {% set obj_title = obj.title.strip() if obj.title else "" %}
@@ -72,42 +76,54 @@
                   {% if obj_title %}
                     {{ obj_title }}
                   {% else %}
-                    <span class="text-slate-400">Untitled objective</span>
+                    <span class="text-slate-400" data-i18n="plans.objectives.untitled"></span>
                   {% endif %}
                 </div>
                 <div class="text-xs text-slate-500">
-                  Due {{ obj.due_date }} - {{ obj.status }}
-                  {% if obj.linked_goal_id %}
-                    - Goal: {{ goals_by_id.get(obj.linked_goal_id, "Goal #" ~ obj.linked_goal_id) }}
+                  <span
+                    data-i18n="plans.objectives.due_status"
+                    data-i18n-params='{{ {"date": (obj.due_date|string), "statusKey": "status." ~ obj.status} | tojson }}'
+                  ></span>
+                  {% set goal_title = goals_by_id.get(obj.linked_goal_id) %}
+                  {% if goal_title %}
+                    <span
+                      data-i18n="plans.objectives.goal_format"
+                      data-i18n-params='{{ {"goal": goal_title} | tojson }}'
+                    ></span>
                   {% endif %}
                 </div>
               </div>
               <div class="flex items-center gap-2">
                 {% if obj.status != "completed" %}
                   <form method="post" action="/objectives/{{ obj.id }}/complete">
-                    <button class="text-xs text-emerald-600">Complete</button>
+                    <button class="text-xs text-emerald-600" data-i18n="plans.objectives.complete"></button>
                   </form>
                 {% endif %}
-                <form method="post" action="/objectives/{{ obj.id }}/delete" onsubmit="return confirm('Delete objective?')">
-                  <button class="text-xs text-rose-600">Delete</button>
+                <form
+                  method="post"
+                  action="/objectives/{{ obj.id }}/delete"
+                  data-i18n-attrs='{{ {"data-confirm-message": {"key": "plans.objectives.confirm_delete", "params": {}}} | tojson }}'
+                  onsubmit="return confirm(this.getAttribute('data-confirm-message'))"
+                >
+                  <button class="text-xs text-rose-600" data-i18n="plans.objectives.delete"></button>
                 </form>
               </div>
             </div>
           {% endfor %}
           {% if not objectives %}
-            <div class="text-sm text-slate-500">No objectives yet.</div>
+            <div class="text-sm text-slate-500" data-i18n="plans.objectives.empty"></div>
           {% endif %}
         </div>
       </div>
       <form class="bg-white p-5 rounded border border-slate-200 shadow-sm space-y-4" method="post" action="/habits">
-        <div class="text-base font-semibold">新增习惯</div>
-        <input class="w-full border rounded px-3 py-2 text-sm" name="title" placeholder="习惯标题" required />
+        <div class="text-base font-semibold" data-i18n="plans.habit.add"></div>
+        <input class="w-full border rounded px-3 py-2 text-sm" name="title" data-i18n-placeholder="plans.habit.title_placeholder" required />
         <select class="w-full border rounded px-3 py-2 text-sm" name="frequency">
-          <option value="daily">daily</option>
-          <option value="weekly">weekly</option>
+          <option value="daily" data-i18n="plans.habit.frequency.daily"></option>
+          <option value="weekly" data-i18n="plans.habit.frequency.weekly"></option>
         </select>
         <input class="w-full border rounded px-3 py-2 text-sm" name="target_per_week" type="number" min="1" max="7" value="1" />
-        <button class="w-full bg-slate-900 text-white py-2 rounded text-sm">保存</button>
+        <button class="w-full bg-slate-900 text-white py-2 rounded text-sm" data-i18n="plans.habit.save"></button>
       </form>
     </div>
   </div>

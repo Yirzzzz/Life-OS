@@ -22,16 +22,16 @@
         id="sidebar"
         class="bg-white w-64 border-r border-slate-200 hidden md:flex flex-col"
       >
-        <div class="px-6 py-5 text-xl font-semibold">Life OS</div>
+        <div class="px-6 py-5 text-xl font-semibold" data-i18n="common.app_name"></div>
         <nav class="flex-1 px-4 space-y-2 text-sm">
-          <a class="block px-3 py-2 rounded hover:bg-slate-100" href="/dashboard">Dashboard</a>
-          <a class="block px-3 py-2 rounded hover:bg-slate-100" href="/goals">Goals</a>
-          <a class="block px-3 py-2 rounded hover:bg-slate-100" href="/plans">Plans</a>
-          <a class="block px-3 py-2 rounded hover:bg-slate-100" href="/logs">Logs</a>
-          <a class="block px-3 py-2 rounded hover:bg-slate-100" href="/reviews">Reviews</a>
-          <a class="block px-3 py-2 rounded hover:bg-slate-100" href="/settings">Settings</a>
+          <a class="block px-3 py-2 rounded hover:bg-slate-100" href="/dashboard" data-i18n="nav.dashboard"></a>
+          <a class="block px-3 py-2 rounded hover:bg-slate-100" href="/goals" data-i18n="nav.goals"></a>
+          <a class="block px-3 py-2 rounded hover:bg-slate-100" href="/plans" data-i18n="nav.plans"></a>
+          <a class="block px-3 py-2 rounded hover:bg-slate-100" href="/logs" data-i18n="nav.logs"></a>
+          <a class="block px-3 py-2 rounded hover:bg-slate-100" href="/reviews" data-i18n="nav.reviews"></a>
+          <a class="block px-3 py-2 rounded hover:bg-slate-100" href="/settings" data-i18n="nav.settings"></a>
         </nav>
-        <div class="px-4 py-4 text-xs text-slate-500">Local-first Life OS v1</div>
+        <div class="px-4 py-4 text-xs text-slate-500" data-i18n="common.app_tagline"></div>
       </aside>
       <div class="flex-1 flex flex-col">
         <header class="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
@@ -40,11 +40,27 @@
               class="md:hidden inline-flex items-center justify-center rounded border border-slate-300 px-2 py-1 text-sm"
               onclick="document.getElementById('sidebar').classList.toggle('hidden')"
             >
-              Menu
+              <span data-i18n="common.menu"></span>
             </button>
             <div class="font-semibold text-lg">{% block page_title %}{% endblock %}</div>
           </div>
-          <div class="text-sm text-slate-500">Life OS v1</div>
+          <div class="flex items-center gap-3 text-sm text-slate-500">
+            <div data-i18n="common.app_version"></div>
+            <div class="flex items-center gap-1 border border-slate-200 rounded p-1">
+              <button
+                type="button"
+                class="px-2 py-1 rounded text-xs"
+                data-lang="zh"
+                data-i18n="lang.cn"
+              ></button>
+              <button
+                type="button"
+                class="px-2 py-1 rounded text-xs"
+                data-lang="en"
+                data-i18n="lang.en"
+              ></button>
+            </div>
+          </div>
         </header>
         <main class="flex-1 px-6 py-6">
           <div class="mx-auto w-full max-w-6xl">{% block content %}{% endblock %}</div>
@@ -53,14 +69,422 @@
     </div>
 
     <div id="hx-indicator" class="fixed inset-0 hidden items-center justify-center bg-slate-900/30">
-      <div class="bg-white px-4 py-3 rounded shadow text-sm">Loading...</div>
+      <div class="bg-white px-4 py-3 rounded shadow text-sm" data-i18n="common.loading"></div>
     </div>
     <script>
+      const I18N = {
+        en: {
+          common: {
+            app_name: "Life OS",
+            app_tagline: "Local-first Life OS v1",
+            app_version: "Life OS v1",
+            loading: "Loading...",
+            menu: "Menu",
+            save: "Save",
+            cancel: "Cancel",
+            delete: "Delete",
+            edit: "Edit",
+          },
+          lang: { cn: "CN", en: "EN" },
+          nav: {
+            dashboard: "Dashboard",
+            goals: "Goals",
+            plans: "Plans",
+            logs: "Logs",
+            reviews: "Reviews",
+            settings: "Settings",
+          },
+          dashboard: {
+            overload: {
+              title: "Overload warning",
+              reason: {
+                too_many: "Today has over 8 items. Consider reducing or splitting tasks.",
+                low_completion:
+                  "Completion rate stayed low for a week. Consider lowering plan volume.",
+              },
+            },
+            today_log_overview: "Today log overview",
+            log_overview_empty: "No entry yet.",
+            go_logs_edit: "Open Logs to edit today's entry",
+            today_plan: "Today plan",
+            view_details: "View details",
+            today_log: "Today log",
+            log_status: { has: "Recorded", empty: "Not recorded" },
+            write_log: "Write log",
+            objectives: {
+              title: "Short-term objectives",
+              empty: "No short-term objectives yet.",
+              untitled: "Untitled objective",
+              remaining_days: "- {days}d",
+              manage: "Manage objectives",
+            },
+            habit_progress: {
+              title: "Habit progress snapshot",
+              prev_month: "Prev month",
+              next_month: "Next month",
+              week_rate: "This week completion",
+              month_rate: "This month completion",
+              since_start: "Since start_date",
+              last_days: "Last {days} days",
+              legend: { low: "low", mid: "mid", high: "high" },
+              since_summary: "{days} days - avg completion {rate}%",
+            },
+            suggestions: { title: "Agent suggestions", refresh: "Refresh suggestions" },
+          },
+          plans: {
+            daily_plan: { title: "Daily plan", empty: "No plan items yet." },
+            daily_item: {
+              add: "Add daily item",
+              title_placeholder: "Daily item title",
+              goal_optional: "Link goal (optional)",
+              note_placeholder: "Note",
+              save: "Save",
+            },
+            objective: {
+              add: "Add short-term objective",
+              title_placeholder: "Objective title",
+              select_goal: "Select goal",
+              note_placeholder: "Note",
+              save: "Save",
+            },
+            objectives: {
+              title: "Short-term objectives",
+              empty: "No objectives yet.",
+              untitled: "Untitled objective",
+              complete: "Complete",
+              delete: "Delete",
+              due_status: "Due {date} - {status}",
+              goal_format: " - Goal: {goal}",
+              confirm_delete: "Delete this objective?",
+            },
+            habit: {
+              title: "Recurring habits",
+              empty: "No habits yet.",
+              add: "Add habit",
+              title_placeholder: "Habit title",
+              save: "Save",
+              frequency: { daily: "daily", weekly: "weekly" },
+              frequency_from: "{frequency} - from {start}",
+            },
+          },
+          plan_item: {
+            mark_complete: "Mark complete",
+            mark_incomplete: "Completed",
+            delete_habit: "Delete habit",
+            confirm_delete_habit:
+              "Confirm delete Habit \"{title}\"? This will stop future weekly/daily generation.",
+            confirm_delete_plan:
+              "Confirm delete Plan \"{title}\"? This action cannot be undone.",
+          },
+          logs: {
+            title: "Logs",
+            period_log: "Period log table",
+            period_prompt: "What did you do this {period}?",
+            log_table: "Log table",
+            filters: { tag: "Tag", plan_item: "Plan item", apply: "Filter" },
+            single_day_edit: "Single day edit",
+            invalid_date_notice: "Invalid date parameter; fell back to today.",
+            info_text:
+              "Edit today's entry on the dashboard. This page is for viewing or supplementing past logs.",
+            go_dashboard: "Go to dashboard",
+            journal_placeholder: "Markdown journal",
+            tags_placeholder: "Tags (comma-separated)",
+            save: "Save",
+            align: "Auto align",
+            markdown_preview: "Markdown preview",
+            save_success: "Saved.",
+          },
+          settings: { import_done: "Import completed." },
+          log_table: {
+            date: "Date",
+            summary: "Period summary",
+            tags: "Tags",
+            actions: "Actions",
+            view: "View",
+            empty: "No logs yet.",
+          },
+          align: {
+            title: "Auto align suggestions",
+            complete: "Mark completed",
+            match_habit: "Matched habit",
+            empty: "No alignable items found.",
+            done: "Aligned: {title}",
+          },
+          suggestions: {
+            metrics: "Metrics: {metrics}",
+            accept: "Accept",
+            ignore: "Ignore",
+            snooze: "Snooze",
+            empty: "No suggestions",
+          },
+          error: { title: "Error", retry: "Retry" },
+          status: { pending: "pending", completed: "completed", expired: "expired" },
+          day: { mon: "Mon", tue: "Tue", wed: "Wed", thu: "Thu", fri: "Fri", sat: "Sat", sun: "Sun" },
+          period: { morning: "Morning", afternoon: "Afternoon", evening: "Evening" },
+        },
+        zh: {
+          common: {
+            app_name: "Life OS",
+            app_tagline: "本地优先的 Life OS v1",
+            app_version: "Life OS v1",
+            loading: "加载中...",
+            menu: "菜单",
+            save: "保存",
+            cancel: "取消",
+            delete: "删除",
+            edit: "编辑",
+          },
+          lang: { cn: "CN", en: "EN" },
+          nav: {
+            dashboard: "首页",
+            goals: "目标",
+            plans: "计划",
+            logs: "日志",
+            reviews: "复盘",
+            settings: "设置",
+          },
+          dashboard: {
+            overload: {
+              title: "过载预警",
+              reason: {
+                too_many: "今日计划超过 8 项，建议减少密度或拆分。",
+                low_completion: "连续一周完成率偏低，建议下调计划数量。",
+              },
+            },
+            today_log_overview: "今日日志概览",
+            log_overview_empty: "未记录",
+            go_logs_edit: "去 Logs 编辑今日记录",
+            today_plan: "今日计划",
+            view_details: "查看详情",
+            today_log: "今日日志",
+            log_status: { has: "已记录", empty: "未记录" },
+            write_log: "记录日志",
+            objectives: {
+              title: "短期目标",
+              empty: "暂无短期目标",
+              untitled: "未命名目标",
+              remaining_days: "- {days}天",
+              manage: "查看详情",
+            },
+            habit_progress: {
+              title: "习惯进度摘要",
+              prev_month: "上个月",
+              next_month: "下个月",
+              week_rate: "本周完成率",
+              month_rate: "本月完成率",
+              since_start: "从 start_date 至今",
+              last_days: "最近 {days} 天",
+              legend: { low: "低", mid: "中", high: "高" },
+              since_summary: "已坚持{days}天 - 平均完成率{rate}%",
+            },
+            suggestions: { title: "Agent 建议", refresh: "刷新建议" },
+          },
+          plans: {
+            daily_plan: { title: "每日计划", empty: "暂无计划项" },
+            daily_item: {
+              add: "新增每日事项",
+              title_placeholder: "事项标题",
+              goal_optional: "关联目标（可选）",
+              note_placeholder: "备注",
+              save: "保存",
+            },
+            objective: {
+              add: "新增短期目标",
+              title_placeholder: "目标标题",
+              select_goal: "选择目标",
+              note_placeholder: "备注",
+              save: "保存",
+            },
+            objectives: {
+              title: "短期目标",
+              empty: "暂无短期目标",
+              untitled: "未命名目标",
+              complete: "完成",
+              delete: "删除",
+              due_status: "截止 {date} - {status}",
+              goal_format: " - 目标：{goal}",
+              confirm_delete: "确认删除该目标？",
+            },
+            habit: {
+              title: "例行计划",
+              empty: "暂无习惯",
+              add: "新增习惯",
+              title_placeholder: "习惯标题",
+              save: "保存",
+              frequency: { daily: "每日", weekly: "每周" },
+              frequency_from: "{frequency} - 从 {start}",
+            },
+          },
+          plan_item: {
+            mark_complete: "标记完成",
+            mark_incomplete: "已完成",
+            delete_habit: "删除习惯",
+            confirm_delete_habit: "确认删除习惯“{title}”？将停止后续生成。",
+            confirm_delete_plan: "确认删除计划“{title}”？此操作不可撤销。",
+          },
+          logs: {
+            title: "日志",
+            period_log: "时段日志表",
+            period_prompt: "今天{period}你做了什么？",
+            log_table: "日志表格",
+            filters: { tag: "标签", plan_item: "计划项", apply: "过滤" },
+            single_day_edit: "单日编辑",
+            invalid_date_notice: "日期参数无效，已回退到今日。",
+            info_text: "今日日志请在首页编辑，这里用于查看或补充历史记录。",
+            go_dashboard: "去首页",
+            journal_placeholder: "Markdown 日记",
+            tags_placeholder: "标签（逗号分隔）",
+            save: "保存",
+            align: "自动对齐",
+            markdown_preview: "Markdown 预览",
+            save_success: "已保存",
+          },
+          settings: { import_done: "导入完成" },
+          log_table: {
+            date: "日期",
+            summary: "时段摘要",
+            tags: "标签",
+            actions: "操作",
+            view: "查看",
+            empty: "暂无日志",
+          },
+          align: {
+            title: "自动对齐建议",
+            complete: "补记完成",
+            match_habit: "匹配习惯",
+            empty: "未发现可对齐的条目",
+            done: "已补记：{title}",
+          },
+          suggestions: {
+            metrics: "指标：{metrics}",
+            accept: "接受",
+            ignore: "忽略",
+            snooze: "稍后",
+            empty: "暂无建议",
+          },
+          error: { title: "发生错误", retry: "重试" },
+          status: { pending: "待处理", completed: "已完成", expired: "已过期" },
+          day: { mon: "周一", tue: "周二", wed: "周三", thu: "周四", fri: "周五", sat: "周六", sun: "周日" },
+          period: { morning: "上午", afternoon: "下午", evening: "晚上" },
+        },
+      };
+      const LOCALE_KEY = "lifeos.locale";
+      const defaultLocale = "zh";
+      let currentLocale = localStorage.getItem(LOCALE_KEY) || defaultLocale;
+
+      function getDictValue(dict, key) {
+        return key.split(".").reduce((acc, part) => (acc && acc[part] ? acc[part] : null), dict);
+      }
+
+      function resolveParams(params) {
+        const resolved = {};
+        Object.entries(params).forEach(([key, value]) => {
+          if (key.endsWith("Key")) {
+            const targetKey = key.slice(0, -3);
+            resolved[targetKey] = t(value);
+            return;
+          }
+          if (typeof value === "string" && value.startsWith("i18n:")) {
+            resolved[key] = t(value.slice(5));
+            return;
+          }
+          if (value && typeof value === "object") {
+            resolved[key] = JSON.stringify(value);
+            return;
+          }
+          resolved[key] = value;
+        });
+        return resolved;
+      }
+
+      function t(key, params = {}) {
+        const dict = I18N[currentLocale] || {};
+        let text = getDictValue(dict, key);
+        if (!text) {
+          return key;
+        }
+        if (typeof text !== "string") {
+          return key;
+        }
+        const resolvedParams = resolveParams(params);
+        return text.replace(/\{(\w+)\}/g, (match, paramKey) =>
+          resolvedParams[paramKey] !== undefined ? resolvedParams[paramKey] : match
+        );
+      }
+
+      function parseParams(raw) {
+        if (!raw) return {};
+        try {
+          return JSON.parse(raw);
+        } catch {
+          return {};
+        }
+      }
+
+      function applyTranslations(root = document) {
+        root.querySelectorAll("[data-i18n]").forEach((el) => {
+          const key = el.getAttribute("data-i18n");
+          if (!key) return;
+          const params = parseParams(el.getAttribute("data-i18n-params"));
+          el.textContent = t(key, params);
+        });
+        root.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
+          const key = el.getAttribute("data-i18n-placeholder");
+          if (!key) return;
+          const params = parseParams(el.getAttribute("data-i18n-params"));
+          el.setAttribute("placeholder", t(key, params));
+        });
+        root.querySelectorAll("[data-i18n-title]").forEach((el) => {
+          const key = el.getAttribute("data-i18n-title");
+          if (!key) return;
+          const params = parseParams(el.getAttribute("data-i18n-params"));
+          el.setAttribute("title", t(key, params));
+        });
+        root.querySelectorAll("[data-i18n-value]").forEach((el) => {
+          const key = el.getAttribute("data-i18n-value");
+          if (!key) return;
+          const params = parseParams(el.getAttribute("data-i18n-params"));
+          el.setAttribute("value", t(key, params));
+        });
+        root.querySelectorAll("[data-i18n-attrs]").forEach((el) => {
+          const raw = el.getAttribute("data-i18n-attrs");
+          if (!raw) return;
+          const attrs = parseParams(raw);
+          Object.entries(attrs).forEach(([attrName, payload]) => {
+            if (!payload || !payload.key) return;
+            el.setAttribute(attrName, t(payload.key, payload.params || {}));
+          });
+        });
+        document.documentElement.setAttribute("lang", currentLocale);
+        document.title = t("common.app_version");
+        document.querySelectorAll("[data-lang]").forEach((btn) => {
+          btn.classList.toggle(
+            "bg-slate-900 text-white",
+            btn.getAttribute("data-lang") === currentLocale
+          );
+        });
+      }
+
       document.body.addEventListener("htmx:beforeRequest", function () {
         document.getElementById("hx-indicator").classList.remove("hidden");
       });
       document.body.addEventListener("htmx:afterRequest", function () {
         document.getElementById("hx-indicator").classList.add("hidden");
+      });
+      document.body.addEventListener("htmx:afterSwap", function (event) {
+        applyTranslations(event.target);
+      });
+      document.addEventListener("DOMContentLoaded", function () {
+        document.querySelectorAll("[data-lang]").forEach((btn) => {
+          btn.addEventListener("click", function () {
+            const nextLocale = btn.getAttribute("data-lang");
+            if (!nextLocale) return;
+            currentLocale = nextLocale;
+            localStorage.setItem(LOCALE_KEY, currentLocale);
+            applyTranslations(document);
+          });
+        });
+        applyTranslations(document);
       });
     </script>
   </body>

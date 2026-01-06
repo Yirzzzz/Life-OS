@@ -41,7 +41,11 @@ def _get_periods(session: Session) -> List[str]:
 
 
 def _period_labels() -> Dict[str, str]:
-    return {"morning": "上午", "afternoon": "下午", "evening": "晚上"}
+    return {
+        "morning": "period.morning",
+        "afternoon": "period.afternoon",
+        "evening": "period.evening",
+    }
 
 
 def _ensure_day_log(session: Session, target_date: date) -> DayLog:
@@ -452,7 +456,7 @@ def dashboard(request: Request, habit_month: Optional[str] = None) -> Response:
     overload_reason = ""
     if len(items) > 8:
         overload = True
-        overload_reason = "今日计划超过 8 项，建议减少密度或拆分。"
+        overload_reason = "dashboard.overload.reason.too_many"
     else:
         week_start = today - timedelta(days=6)
         week_plans = session.exec(
@@ -466,7 +470,7 @@ def dashboard(request: Request, habit_month: Optional[str] = None) -> Response:
         week_rate = week_completed / len(week_items) if week_items else 1
         if week_rate < 0.3:
             overload = True
-            overload_reason = "连续一周完成率偏低，建议降低计划数量。"
+            overload_reason = "dashboard.overload.reason.low_completion"
 
     return templates.TemplateResponse(
         "dashboard.html",
@@ -987,6 +991,7 @@ def logs_table(
             "start_date": start,
             "end_date": end,
             "plan_item": plan_item or "",
+            "period_labels": _period_labels(),
         },
     )
 
@@ -1037,7 +1042,7 @@ def save_log(
         )
     return templates.TemplateResponse(
         "partials/log_save_result.html",
-        {"request": request, "message": "已保存"},
+        {"request": request, "message": "logs.save_success"},
     )
 
 
@@ -1246,5 +1251,5 @@ def import_json_route(
         )
     return templates.TemplateResponse(
         "partials/log_save_result.html",
-        {"request": request, "message": "导入完成"},
+        {"request": request, "message": "settings.import_done"},
     )

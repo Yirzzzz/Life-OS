@@ -7,7 +7,7 @@
   >
     <input class="w-full border rounded px-2 py-1 text-sm" name="title" value="{{ item.title }}" required />
     <select class="w-full border rounded px-2 py-1 text-sm" name="linked_goal_id" {% if objective %}required{% endif %}>
-      <option value="" {% if not item.linked_goal_id %}selected{% endif %}{% if objective %} disabled{% endif %}>Select goal</option>
+      <option value="" {% if not item.linked_goal_id %}selected{% endif %}{% if objective %} disabled{% endif %} data-i18n="plans.objective.select_goal"></option>
       {% for goal in goals %}
         <option value="{{ goal.id }}" {% if item.linked_goal_id == goal.id %}selected{% endif %}>{{ goal.title }}</option>
       {% endfor %}
@@ -21,23 +21,22 @@
         required
       />
       <select class="w-full border rounded px-2 py-1 text-sm" name="status">
-        <option value="pending" {% if objective.status == 'pending' %}selected{% endif %}>pending</option>
-        <option value="completed" {% if objective.status == 'completed' %}selected{% endif %}>completed</option>
-        <option value="expired" {% if objective.status == 'expired' %}selected{% endif %}>expired</option>
+        <option value="pending" {% if objective.status == 'pending' %}selected{% endif %} data-i18n="status.pending"></option>
+        <option value="completed" {% if objective.status == 'completed' %}selected{% endif %} data-i18n="status.completed"></option>
+        <option value="expired" {% if objective.status == 'expired' %}selected{% endif %} data-i18n="status.expired"></option>
       </select>
     {% endif %}
-    <input class="w-full border rounded px-2 py-1 text-sm" name="note" value="{{ item.note }}" placeholder="Note" />
+    <input class="w-full border rounded px-2 py-1 text-sm" name="note" value="{{ item.note }}" data-i18n-placeholder="plans.daily_item.note_placeholder" />
     <div class="flex items-center gap-2">
-      <button class="flex-1 bg-slate-900 text-white py-1 rounded">Save</button>
+      <button class="flex-1 bg-slate-900 text-white py-1 rounded" data-i18n="common.save"></button>
       <button
         type="button"
         class="px-3 py-1 border rounded"
         hx-get="/plans/items/{{ item.id }}"
         hx-target="closest .plan-item"
         hx-swap="outerHTML"
-      >
-        Cancel
-      </button>
+        data-i18n="common.cancel"
+      ></button>
     </div>
   </form>
 </div>

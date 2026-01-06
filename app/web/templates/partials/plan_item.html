@@ -12,26 +12,26 @@
     hx-swap="outerHTML"
   >
     <input type="hidden" name="completed" value="{{ false if item.completed_at else true }}" />
-    <button class="text-xs px-3 py-1 border rounded {% if item.completed_at %}bg-emerald-50{% endif %}">
-      {{ "已完成" if item.completed_at else "标记完成" }}
-    </button>
+    <button
+      class="text-xs px-3 py-1 border rounded {% if item.completed_at %}bg-emerald-50{% endif %}"
+      data-i18n="{{ 'plan_item.mark_incomplete' if item.completed_at else 'plan_item.mark_complete' }}"
+    ></button>
   </form>
     <button
       class="text-xs px-3 py-1 border rounded"
       hx-get="/plans/items/{{ item.id }}/edit"
       hx-target="closest .plan-item"
       hx-swap="outerHTML"
-    >
-      Edit
-    </button>
+      data-i18n="common.edit"
+    ></button>
+    {% set confirm_key = 'plan_item.confirm_delete_habit' if item.linked_habit_id else 'plan_item.confirm_delete_plan' %}
     <button
       class="text-xs px-3 py-1 border rounded text-rose-600 border-rose-200"
       hx-post="{% if item.linked_habit_id %}/habits/{{ item.linked_habit_id }}/delete{% else %}/plans/items/{{ item.id }}/delete{% endif %}"
       hx-target="closest .plan-item"
       hx-swap="outerHTML"
-      hx-confirm="{% if item.linked_habit_id %}Confirm delete Habit &quot;{{ item.title }}&quot;? This will stop future weekly/daily generation.{% else %}Confirm delete Plan &quot;{{ item.title }}&quot;? This action cannot be undone.{% endif %}"
-    >
-      {% if item.linked_habit_id %}Delete habit{% else %}Delete{% endif %}
-    </button>
+      data-i18n="{{ 'plan_item.delete_habit' if item.linked_habit_id else 'common.delete' }}"
+      data-i18n-attrs='{{ {"hx-confirm": {"key": confirm_key, "params": {"title": item.title}}} | tojson }}'
+    ></button>
   </div>
 </div>

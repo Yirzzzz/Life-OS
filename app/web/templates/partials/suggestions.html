@@ -4,24 +4,28 @@
       <div class="border border-slate-200 rounded p-3 text-sm">
         <div class="text-sm font-semibold">{{ suggestion.type }}</div>
         <div class="text-slate-600">{{ suggestion.reason }}</div>
-        <div class="text-xs text-slate-500 mt-2">指标: {{ suggestion.metrics_json }}</div>
+        <div
+          class="text-xs text-slate-500 mt-2"
+          data-i18n="suggestions.metrics"
+          data-i18n-params='{{ {"metrics": suggestion.metrics_json} | tojson }}'
+        ></div>
         <div class="mt-3 flex gap-2">
           <form hx-post="/suggestions/{{ suggestion.id }}/decide" hx-target="#suggestion-list">
             <input type="hidden" name="decision" value="accept" />
-            <button class="px-2 py-1 text-xs border rounded">接受</button>
+            <button class="px-2 py-1 text-xs border rounded" data-i18n="suggestions.accept"></button>
           </form>
           <form hx-post="/suggestions/{{ suggestion.id }}/decide" hx-target="#suggestion-list">
             <input type="hidden" name="decision" value="ignore" />
-            <button class="px-2 py-1 text-xs border rounded">忽略</button>
+            <button class="px-2 py-1 text-xs border rounded" data-i18n="suggestions.ignore"></button>
           </form>
           <form hx-post="/suggestions/{{ suggestion.id }}/decide" hx-target="#suggestion-list">
             <input type="hidden" name="decision" value="snooze" />
-            <button class="px-2 py-1 text-xs border rounded">稍后</button>
+            <button class="px-2 py-1 text-xs border rounded" data-i18n="suggestions.snooze"></button>
           </form>
         </div>
       </div>
     {% endfor %}
   </div>
 {% else %}
-  <div class="text-sm text-slate-500">暂无建议</div>
+  <div class="text-sm text-slate-500" data-i18n="suggestions.empty"></div>
 {% endif %}
