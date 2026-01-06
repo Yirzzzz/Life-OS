@@ -1,6 +1,12 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+from typing import Optional
+
+from alembic import command
+from alembic.config import Config
+from sqlalchemy.engine import make_url
 from sqlmodel import SQLModel, Session, create_engine
 
 DATABASE_URL = os.getenv("LIFEOS_DATABASE_URL", "sqlite:///lifeos.db")
@@ -8,25 +14,35 @@ DATABASE_URL = os.getenv("LIFEOS_DATABASE_URL", "sqlite:///lifeos.db")
 engine = create_engine(DATABASE_URL, echo=False)
 
 
+def _sqlite_path() -> Optional[str]:
+    url = make_url(DATABASE_URL)
+    if url.drivername.startswith("sqlite") and url.database and url.database != ":memory:":
+        return os.path.abspath(url.database)
+    return None
+
+
+def database_exists() -> bool:
+    path = _sqlite_path()
+    if path:
+        return os.path.exists(path)
+    return False
+
+
+def _run_alembic_upgrade() -> None:
+    root = Path(__file__).resolve().parents[1]
+    config = Config(str(root / "alembic.ini"))
+    config.set_main_option("sqlalchemy.url", DATABASE_URL)
+    command.upgrade(config, "head")
+
+
+def migrate_db() -> None:
+    _run_alembic_upgrade()
+
+
 def init_db() -> None:
-    from app.domain import models  # noqa: F401
-    SQLModel.metadata.create_all(engine)
-    with engine.begin() as conn:
-        columns = {
-            row[1] for row in conn.exec_driver_sql("PRAGMA table_info(planitem)").fetchall()
-        }
-        if "linked_objective_id" not in columns:
-            conn.exec_driver_sql(
-                "ALTER TABLE planitem ADD COLUMN linked_objective_id INTEGER"
-            )
-        habit_columns = {
-            row[1] for row in conn.exec_driver_sql("PRAGMA table_info(habit)").fetchall()
-        }
-        if "start_date" not in habit_columns:
-            conn.exec_driver_sql("ALTER TABLE habit ADD COLUMN start_date DATE")
-        conn.exec_driver_sql(
-            "UPDATE habit SET start_date = '2026-01-01' WHERE start_date IS NULL"
-        )
+    if database_exists():
+        return
+    _run_alembic_upgrade()
 
 
 def get_session() -> Session:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 
-from app.db import init_db
+from app.db import migrate_db
 
 
 def main() -> int:
@@ -15,7 +15,7 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.command == "migrate":
-        init_db()
+        migrate_db()
         print("Database migrated.")
         return 0
 

@@ -40,7 +40,6 @@ def create_app() -> FastAPI:
     @app.on_event("startup")
     def _startup() -> None:
         init_db()
-        seed_db()
 
     return app
 

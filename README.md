@@ -28,6 +28,8 @@ python manage.py migrate
 
 Set `LIFEOS_DATABASE_URL` to override the database location (default: `sqlite:///lifeos.db`).
 
+For schema changes, create a new Alembic revision and apply it with `python manage.py migrate`.
+
 ## Delight Choices
 
 - D1 计划-日志自动对齐：成本低、直接提升日志补记效率。
