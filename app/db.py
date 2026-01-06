@@ -9,6 +9,7 @@ engine = create_engine(DATABASE_URL, echo=False)
 
 
 def init_db() -> None:
+    from app.domain import models  # noqa: F401
     SQLModel.metadata.create_all(engine)
     with engine.begin() as conn:
         columns = {

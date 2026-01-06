@@ -18,6 +18,16 @@ uvicorn app.main:app --reload
 
 Open `http://127.0.0.1:8000`.
 
+## Database
+
+The app auto-initializes the SQLite database on startup. You can also run:
+
+```bash
+python manage.py migrate
+```
+
+Set `LIFEOS_DATABASE_URL` to override the database location (default: `sqlite:///lifeos.db`).
+
 ## Delight Choices
 
 - D1 计划-日志自动对齐：成本低、直接提升日志补记效率。

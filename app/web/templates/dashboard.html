@@ -139,8 +139,8 @@
             <a class="px-2 py-1 border border-slate-200 rounded" href="/dashboard?habit_month={{ habit_progress_next_month }}" data-i18n="dashboard.habit_progress.next_month"></a>
           </div>
         </div>
-      <div class="mt-4 grid md:grid-cols-3 gap-6">
-        <div class="md:col-span-2">
+      <div class="mt-4 grid md:grid-cols-4 gap-6">
+        <div class="md:col-span-1">
           <div class="inline-grid gap-2">
             <div class="grid grid-cols-7 gap-x-1 gap-y-2 w-fit text-[12px] text-slate-400 justify-items-center">
               <div class="text-center" data-i18n="day.mon"></div>
@@ -172,8 +172,8 @@
             </div>
           </div>
         </div>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-          <div class="rounded border border-slate-200 bg-white p-3">
+        <div class="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4 md:col-span-3">
+          <div class="flex h-full min-w-[180px] flex-col rounded border border-slate-200 bg-white p-4">
             <div class="text-xs text-slate-500" data-i18n="dashboard.habit_progress.daily_week_rate"></div>
             {% if habit_progress.daily_week_total %}
               <div class="mt-2 text-3xl font-semibold leading-none">
@@ -187,7 +187,7 @@
               <div class="mt-1 text-xs text-slate-400" data-i18n="dashboard.habit_progress.no_items"></div>
             {% endif %}
           </div>
-          <div class="rounded border border-slate-200 bg-white p-3">
+          <div class="flex h-full min-w-[180px] flex-col rounded border border-slate-200 bg-white p-4">
             <div class="text-xs text-slate-500" data-i18n="dashboard.habit_progress.weekly_week_rate"></div>
             {% if habit_progress.weekly_week_total %}
               {% set weekly_week_pct = (habit_progress.weekly_week_done / habit_progress.weekly_week_total * 100) | round(0) %}
@@ -202,7 +202,7 @@
               <div class="mt-1 text-xs text-slate-400" data-i18n="dashboard.habit_progress.no_items"></div>
             {% endif %}
           </div>
-          <div class="rounded border border-slate-200 bg-white p-3">
+          <div class="flex h-full min-w-[180px] flex-col rounded border border-slate-200 bg-white p-4">
             <div class="text-xs text-slate-500" data-i18n="dashboard.habit_progress.daily_month_rate"></div>
             {% if habit_progress.daily_month_total %}
               <div class="mt-2 text-3xl font-semibold leading-none">
@@ -216,7 +216,7 @@
               <div class="mt-1 text-xs text-slate-400" data-i18n="dashboard.habit_progress.no_items"></div>
             {% endif %}
           </div>
-          <div class="rounded border border-slate-200 bg-white p-3">
+          <div class="flex h-full min-w-[180px] flex-col rounded border border-slate-200 bg-white p-4">
             <div class="text-xs text-slate-500" data-i18n="dashboard.habit_progress.weekly_month_rate"></div>
             {% if habit_progress.weekly_month_total %}
               {% set weekly_month_pct = (habit_progress.weekly_month_done / habit_progress.weekly_month_total * 100) | round(0) %}
@@ -231,7 +231,7 @@
               <div class="mt-1 text-xs text-slate-400" data-i18n="dashboard.habit_progress.no_items"></div>
             {% endif %}
           </div>
-          <div class="sm:col-span-2">
+          <div class="sm:col-span-2 lg:col-span-4">
             <div class="text-xs text-slate-500" data-i18n="dashboard.habit_progress.since_start"></div>
             <div class="text-sm text-slate-700" data-i18n="dashboard.habit_progress.since_summary" data-i18n-params='{"days":"{{ habit_progress.since_days }}","rate":"{{ habit_progress.since_rate_pct }}"}'></div>
           </div>
