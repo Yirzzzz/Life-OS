@@ -287,6 +287,124 @@ def _habit_progress_summary(
     }
 
 
+def _daily_plan_completion(
+    session: Session,
+    start: date,
+    end: date,
+    habit_by_id: Dict[int, HabitTemplate],
+) -> tuple[int, int]:
+    plans = session.exec(
+        select(DailyPlan).where(DailyPlan.date >= start, DailyPlan.date <= end)
+    ).all()
+    if not plans:
+        return 0, 0
+    plan_ids = [plan.id for plan in plans]
+    items = session.exec(
+        select(PlanItem).where(
+            PlanItem.daily_plan_id.in_(plan_ids),
+            PlanItem.linked_objective_id.is_(None),
+        )
+    ).all()
+    filtered = []
+    for item in items:
+        if item.linked_habit_id:
+            habit = habit_by_id.get(item.linked_habit_id)
+            if habit and habit.frequency == "weekly":
+                continue
+        filtered.append(item)
+    completed = len([item for item in filtered if item.completed_at])
+    return completed, len(filtered)
+
+
+def _weekly_plan_completion(
+    session: Session,
+    habits: List[HabitTemplate],
+    week_start: date,
+    week_end: date,
+) -> tuple[int, int, set[int]]:
+    weekly_habits = [
+        habit
+        for habit in habits
+        if habit.frequency == "weekly"
+        and habit.active
+        and (habit.start_date or date(2026, 1, 1)) <= week_end
+    ]
+    if not weekly_habits:
+        return 0, 0, set()
+    weekly_ids = [habit.id for habit in weekly_habits]
+    week_plans = session.exec(
+        select(DailyPlan).where(DailyPlan.date >= week_start, DailyPlan.date <= week_end)
+    ).all()
+    plan_ids = [plan.id for plan in week_plans]
+    completed_ids: set[int] = set()
+    if plan_ids:
+        week_items = session.exec(
+            select(PlanItem).where(
+                PlanItem.daily_plan_id.in_(plan_ids),
+                PlanItem.linked_habit_id.in_(weekly_ids),
+                PlanItem.completed_at.is_not(None),
+            )
+        ).all()
+        completed_ids = {item.linked_habit_id for item in week_items if item.linked_habit_id}
+    done = 0
+    for habit in weekly_habits:
+        target = habit.target_per_week if habit.target_per_week else 1
+        completed_count = 1 if habit.id in completed_ids else 0
+        if completed_count >= target:
+            done += 1
+    return done, len(weekly_habits), completed_ids
+
+
+def _weekly_plan_month_completion(
+    session: Session,
+    habits: List[HabitTemplate],
+    anchor_date: date,
+) -> tuple[int, int]:
+    monthly_start = _month_start(anchor_date)
+    monthly_end = _month_end(anchor_date)
+    week_start = _week_start(monthly_start)
+    week_end = _week_start(monthly_end) + timedelta(days=6)
+    weekly_habits = [
+        habit for habit in habits if habit.frequency == "weekly" and habit.active
+    ]
+    if not weekly_habits:
+        return 0, 0
+    weekly_ids = [habit.id for habit in weekly_habits]
+    week_plans = session.exec(
+        select(DailyPlan).where(DailyPlan.date >= week_start, DailyPlan.date <= week_end)
+    ).all()
+    plan_by_id = {plan.id: plan.date for plan in week_plans}
+    plan_ids = list(plan_by_id.keys())
+    completed_by_week: set[tuple[int, date]] = set()
+    if plan_ids:
+        week_items = session.exec(
+            select(PlanItem).where(
+                PlanItem.daily_plan_id.in_(plan_ids),
+                PlanItem.linked_habit_id.in_(weekly_ids),
+                PlanItem.completed_at.is_not(None),
+            )
+        ).all()
+        for item in week_items:
+            plan_date = plan_by_id.get(item.daily_plan_id)
+            if not plan_date or not item.linked_habit_id:
+                continue
+            completed_by_week.add((item.linked_habit_id, _week_start(plan_date)))
+    total_weeks = 0
+    done_weeks = 0
+    cursor = week_start
+    while cursor <= monthly_end:
+        cursor_end = cursor + timedelta(days=6)
+        for habit in weekly_habits:
+            start_date = habit.start_date or date(2026, 1, 1)
+            if start_date > cursor_end:
+                continue
+            total_weeks += 1
+            if (habit.id, cursor) in completed_by_week:
+                done_weeks += 1
+        cursor += timedelta(days=7)
+    return done_weeks, total_weeks
+
+
 def _sync_plan_items(session: Session, plan: DailyPlan) -> None:
     items = session.exec(select(PlanItem).where(PlanItem.daily_plan_id == plan.id)).all()
     objective_items = [item for item in items if item.linked_objective_id]
@@ -462,26 +580,21 @@ def dashboard(request: Request, habit_month: Optional[str] = None) -> Response:
     suggestions = session.exec(select(Suggestion).where(Suggestion.status == "open")).all()
     habit_progress = _habit_progress_summary(session, anchor_date)
 
-    weekly_habits = [habit for habit in habits if habit.frequency == "weekly"]
+    week_start = _week_start(today)
+    week_end = week_start + timedelta(days=6)
+    weekly_habits = [
+        habit
+        for habit in habits
+        if habit.frequency == "weekly"
+        and habit.active
+        and (habit.start_date or date(2026, 1, 1)) <= week_end
+    ]
     weekly_habit_ids = [habit.id for habit in weekly_habits]
     weekly_plan_items: List[Dict[str, Any]] = []
+    weekly_week_done, weekly_week_total, completed_weekly_ids = _weekly_plan_completion(
+        session, habits, week_start, week_end
+    )
     if weekly_habit_ids:
-        week_start = _week_start(today)
-        week_end = week_start + timedelta(days=6)
-        week_plans = session.exec(
-            select(DailyPlan).where(DailyPlan.date >= week_start, DailyPlan.date <= week_end)
-        ).all()
-        plan_ids = [plan.id for plan in week_plans]
-        completed_weekly_ids: set[int] = set()
-        if plan_ids:
-            week_items = session.exec(
-                select(PlanItem).where(
-                    PlanItem.daily_plan_id.in_(plan_ids),
-                    PlanItem.linked_habit_id.in_(weekly_habit_ids),
-                    PlanItem.completed_at.is_not(None),
-                )
-            ).all()
-            completed_weekly_ids = {item.linked_habit_id for item in week_items if item.linked_habit_id}
         for habit in weekly_habits:
             target = habit.target_per_week if habit.target_per_week else 1
             completed_count = 1 if habit.id in completed_weekly_ids else 0
@@ -503,6 +616,51 @@ def dashboard(request: Request, habit_month: Optional[str] = None) -> Response:
                     "emoji": emoji,
                 }
             )
+
+    if weekly_week_total:
+        weekly_week_rate = weekly_week_done / weekly_week_total
+        if weekly_week_rate >= 1:
+            weekly_week_emoji = "😁"
+        elif weekly_week_rate >= 0.8:
+            weekly_week_emoji = "😊"
+        elif weekly_week_rate > 0:
+            weekly_week_emoji = "💪"
+        else:
+            weekly_week_emoji = "😞"
+    else:
+        weekly_week_emoji = "😞"
+
+    daily_week_done, daily_week_total = _daily_plan_completion(
+        session, week_start, week_end, habit_by_id
+    )
+    month_start = _month_start(today)
+    daily_month_done, daily_month_total = _daily_plan_completion(
+        session, month_start, today, habit_by_id
+    )
+    weekly_month_done, weekly_month_total = _weekly_plan_month_completion(
+        session, habits, today
+    )
+    daily_week_rate_pct = (
+        int(round((daily_week_done / daily_week_total) * 100)) if daily_week_total else 0
+    )
+    daily_month_rate_pct = (
+        int(round((daily_month_done / daily_month_total) * 100)) if daily_month_total else 0
+    )
+    habit_progress.update(
+        {
+            "daily_week_done": daily_week_done,
+            "daily_week_total": daily_week_total,
+            "daily_week_rate_pct": daily_week_rate_pct,
+            "daily_month_done": daily_month_done,
+            "daily_month_total": daily_month_total,
+            "daily_month_rate_pct": daily_month_rate_pct,
+            "weekly_week_done": weekly_week_done,
+            "weekly_week_total": weekly_week_total,
+            "weekly_week_emoji": weekly_week_emoji,
+            "weekly_month_done": weekly_month_done,
+            "weekly_month_total": weekly_month_total,
+        }
+    )
 
     overload = False
     overload_reason = ""

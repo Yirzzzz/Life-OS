@@ -54,6 +54,10 @@
 
       <div class="bg-white p-5 rounded shadow-sm border border-slate-200">
         <div class="text-xs text-slate-500" data-i18n="dashboard.weekly_plan.title"></div>
+        <div class="text-3xl font-semibold flex items-center gap-2 mt-2">
+          <span>{{ habit_progress.weekly_week_done }}/{{ habit_progress.weekly_week_total }}</span>
+          <span class="text-xl emoji">{{ habit_progress.weekly_week_emoji }}</span>
+        </div>
         {% if weekly_plan_items %}
           <div class="mt-2 space-y-2 text-sm">
             {% for item in weekly_plan_items %}
@@ -170,41 +174,27 @@
         </div>
         <div class="space-y-3 text-sm">
           <div>
-            <div class="text-xs text-slate-500 flex items-center gap-2">
-              <span data-i18n="dashboard.habit_progress.week_rate"></span>
-              <span class="text-base">
-                {% if habit_progress.week_rate_pct >= 100 %}
-                  😁
-                {% elif habit_progress.week_rate_pct >= 60 %}
-                  😊
-                {% elif habit_progress.week_rate_pct >= 20 %}
-                  💪
-                {% else %}
-                  😞
-                {% endif %}
-              </span>
-            </div>
+            <div class="text-xs text-slate-500" data-i18n="dashboard.habit_progress.daily_week_rate"></div>
             <div class="text-lg font-semibold">
-              {{ habit_progress.week_rate_pct }}% ({{ habit_progress.week_completed_days }}/{{ habit_progress.week_eligible_days }})
+              {{ habit_progress.daily_week_rate_pct }}% ({{ habit_progress.daily_week_done }}/{{ habit_progress.daily_week_total }})
             </div>
           </div>
           <div>
-            <div class="text-xs text-slate-500 flex items-center gap-2">
-              <span data-i18n="dashboard.habit_progress.month_rate"></span>
-              <span class="text-base">
-                {% if habit_progress.month_rate_pct >= 100 %}
-                  😁
-                {% elif habit_progress.month_rate_pct >= 60 %}
-                  😊
-                {% elif habit_progress.month_rate_pct >= 20 %}
-                  💪
-                {% else %}
-                  😞
-                {% endif %}
-              </span>
-            </div>
+            <div class="text-xs text-slate-500" data-i18n="dashboard.habit_progress.weekly_week_rate"></div>
             <div class="text-lg font-semibold">
-              {{ habit_progress.month_rate_pct }}% ({{ habit_progress.month_completed_days }}/{{ habit_progress.month_eligible_days }})
+              {{ habit_progress.weekly_week_done }}/{{ habit_progress.weekly_week_total }}
+            </div>
+          </div>
+          <div>
+            <div class="text-xs text-slate-500" data-i18n="dashboard.habit_progress.daily_month_rate"></div>
+            <div class="text-lg font-semibold">
+              {{ habit_progress.daily_month_rate_pct }}% ({{ habit_progress.daily_month_done }}/{{ habit_progress.daily_month_total }})
+            </div>
+          </div>
+          <div>
+            <div class="text-xs text-slate-500" data-i18n="dashboard.habit_progress.weekly_month_rate"></div>
+            <div class="text-lg font-semibold">
+              {{ habit_progress.weekly_month_done }}/{{ habit_progress.weekly_month_total }}
             </div>
           </div>
           <div>
