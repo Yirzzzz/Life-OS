@@ -285,14 +285,22 @@ def _habit_progress_summary(
 
 def _sync_plan_items(session: Session, plan: DailyPlan) -> None:
     items = session.exec(select(PlanItem).where(PlanItem.daily_plan_id == plan.id)).all()
-    existing_habit_ids = {item.linked_habit_id for item in items if item.linked_habit_id}
+    objective_items = [item for item in items if item.linked_objective_id]
+    if objective_items:
+        for item in objective_items:
+            session.delete(item)
+    existing_habit_ids = {
+        item.linked_habit_id
+        for item in items
+        if item.linked_habit_id and not item.linked_objective_id
+    }
     suppressions = session.exec(
         select(PlanItemSuppression).where(PlanItemSuppression.date == plan.date)
     ).all()
     suppressed_habit_ids = {
         row.linked_habit_id for row in suppressions if row.linked_habit_id
     }
-    changed = False
+    changed = bool(objective_items)
 
     templates = session.exec(
         select(HabitTemplate).where(HabitTemplate.active == True)  # noqa: E712
@@ -415,7 +423,12 @@ def dashboard(request: Request, habit_month: Optional[str] = None) -> Response:
     )
     plan = _ensure_daily_plan(session, today)
     _sync_plan_items(session, plan)
-    items = session.exec(select(PlanItem).where(PlanItem.daily_plan_id == plan.id)).all()
+    items = session.exec(
+        select(PlanItem).where(
+            PlanItem.daily_plan_id == plan.id,
+            PlanItem.linked_objective_id.is_(None),
+        )
+    ).all()
     completed = len([item for item in items if item.completed_at])
     habits = session.exec(select(HabitTemplate).where(HabitTemplate.active == True)).all()  # noqa: E712
     objectives = session.exec(
@@ -614,9 +627,18 @@ def plans(request: Request, target_date: Optional[str] = None) -> Response:
     selected_date = _parse_date(target_date, _today())
     plan = _ensure_daily_plan(session, selected_date)
     _sync_plan_items(session, plan)
-    items = session.exec(select(PlanItem).where(PlanItem.daily_plan_id == plan.id)).all()
+    items = session.exec(
+        select(PlanItem).where(
+            PlanItem.daily_plan_id == plan.id,
+            PlanItem.linked_objective_id.is_(None),
+        )
+    ).all()
     habits = session.exec(select(HabitTemplate).where(HabitTemplate.active == True)).all()  # noqa: E712
+    objectives = session.exec(
+        select(ShortTermObjective).order_by(ShortTermObjective.due_date)
+    ).all()
     goals_list = session.exec(select(Goal)).all()
+    goals_by_id = {goal.id: goal.title for goal in goals_list}
     return templates.TemplateResponse(
         "plans.html",
         {
@@ -624,7 +646,9 @@ def plans(request: Request, target_date: Optional[str] = None) -> Response:
             "selected_date": selected_date,
             "plan_items": items,
             "habits": habits,
+            "objectives": objectives,
             "goals": goals_list,
+            "goals_by_id": goals_by_id,
         },
     )
 
@@ -650,10 +674,39 @@ def create_plan_item(
     session.add(objective)
     session.commit()
     session.refresh(objective)
-    plan_date = _parse_date(date_value, _today())
-    plan = _ensure_daily_plan(session, plan_date)
-    _sync_plan_items(session, plan)
     return Response(status_code=303, headers={"Location": f"/plans?target_date={date_value}"})
+
+
+@router.post("/objectives/{objective_id}/complete", response_class=HTMLResponse)
+def complete_objective(request: Request, objective_id: int) -> Response:
+    session = _get_session(request)
+    objective = session.exec(
+        select(ShortTermObjective).where(ShortTermObjective.id == objective_id)
+    ).first()
+    if not objective:
+        return Response(status_code=404)
+    objective.status = "completed"
+    session.add(objective)
+    session.commit()
+    return Response(status_code=303, headers={"Location": "/plans"})
+
+
+@router.post("/objectives/{objective_id}/delete", response_class=HTMLResponse)
+def delete_objective(request: Request, objective_id: int) -> Response:
+    session = _get_session(request)
+    objective = session.exec(
+        select(ShortTermObjective).where(ShortTermObjective.id == objective_id)
+    ).first()
+    if not objective:
+        return Response(status_code=404)
+    linked_items = session.exec(
+        select(PlanItem).where(PlanItem.linked_objective_id == objective_id)
+    ).all()
+    for item in linked_items:
+        session.delete(item)
+    session.delete(objective)
+    session.commit()
+    return Response(status_code=303, headers={"Location": "/plans"})
 
 
 @router.post("/plans/items/daily", response_class=HTMLResponse)
