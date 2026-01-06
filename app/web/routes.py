@@ -286,17 +286,11 @@ def _habit_progress_summary(
 def _sync_plan_items(session: Session, plan: DailyPlan) -> None:
     items = session.exec(select(PlanItem).where(PlanItem.daily_plan_id == plan.id)).all()
     existing_habit_ids = {item.linked_habit_id for item in items if item.linked_habit_id}
-    existing_objective_ids = {
-        item.linked_objective_id for item in items if item.linked_objective_id
-    }
     suppressions = session.exec(
         select(PlanItemSuppression).where(PlanItemSuppression.date == plan.date)
     ).all()
     suppressed_habit_ids = {
         row.linked_habit_id for row in suppressions if row.linked_habit_id
-    }
-    suppressed_objective_ids = {
-        row.linked_objective_id for row in suppressions if row.linked_objective_id
     }
     changed = False
 
@@ -343,32 +337,13 @@ def _sync_plan_items(session: Session, plan: DailyPlan) -> None:
         changed = True
 
     objectives = session.exec(
-        select(ShortTermObjective).where(ShortTermObjective.status != "completed")
+        select(ShortTermObjective).where(ShortTermObjective.status == "pending")
     ).all()
     for obj in objectives:
         if obj.status == "pending" and obj.due_date < plan.date:
             obj.status = "expired"
             session.add(obj)
             changed = True
-    for obj in objectives:
-        if obj.status != "pending":
-            continue
-        if obj.due_date < plan.date:
-            continue
-        if obj.id in existing_objective_ids:
-            continue
-        if obj.id in suppressed_objective_ids:
-            continue
-        session.add(
-            PlanItem(
-                daily_plan_id=plan.id,
-                title=obj.title,
-                linked_goal_id=obj.linked_goal_id,
-                linked_objective_id=obj.id,
-                status="pending",
-            )
-        )
-        changed = True
 
     if changed:
         session.commit()
@@ -435,11 +410,28 @@ def dashboard(request: Request, habit_month: Optional[str] = None) -> Response:
     periods = _get_periods(session)
     log = _ensure_day_log(session, today)
     period_rows = _build_period_rows(log, periods)
+    log_has_content = any(
+        (entry.get("text", "") or "").strip() for entry in log.period_entries
+    )
     plan = _ensure_daily_plan(session, today)
     _sync_plan_items(session, plan)
     items = session.exec(select(PlanItem).where(PlanItem.daily_plan_id == plan.id)).all()
     completed = len([item for item in items if item.completed_at])
     habits = session.exec(select(HabitTemplate).where(HabitTemplate.active == True)).all()  # noqa: E712
+    objectives = session.exec(
+        select(ShortTermObjective).where(
+            ShortTermObjective.status == "pending",
+            ShortTermObjective.due_date >= today,
+        ).order_by(ShortTermObjective.due_date)
+    ).all()
+    short_term_objectives = [
+        {
+            "title": obj.title,
+            "due_date": obj.due_date,
+            "remaining_days": (obj.due_date - today).days,
+        }
+        for obj in objectives
+    ]
     suggestions = session.exec(select(Suggestion).where(Suggestion.status == "open")).all()
     habit_progress = _habit_progress_summary(session, anchor_date)
 
@@ -472,6 +464,8 @@ def dashboard(request: Request, habit_month: Optional[str] = None) -> Response:
             "completed": completed,
             "habits": habits,
             "log": log,
+            "log_has_content": log_has_content,
+            "short_term_objectives": short_term_objectives,
             "suggestions": suggestions,
             "overload": overload,
             "overload_reason": overload_reason,
