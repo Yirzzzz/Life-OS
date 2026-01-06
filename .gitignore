@@ -1,0 +1,8 @@
+# Ignore database files
+*.db
+*.sqlite3
+*.sqlite
+
+# Explicit database file names
+app.db
+lifeos.db

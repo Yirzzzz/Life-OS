@@ -1,41 +1,70 @@
-# Life OS v1
+# Life OS v1 🌱
 
-Life OS v1 with FastAPI + SQLModel + Jinja2 + HTMX.
+Life OS v1 is a productivity system built using **FastAPI**, **SQLModel**, **Jinja2**, and **HTMX**. It helps users manage daily, weekly, and short-term goals, track habits, and organize their life efficiently.
 
-## Install
+## Project Overview 🧑‍💻
 
-```bash
+Life OS is a simple yet powerful system designed to help individuals organize their daily tasks, track their habits, and achieve their goals. Built using modern web technologies, it provides:
+
+- **Dynamic Daily and Weekly Plans** 📅 to manage tasks
+- **Real-time Habit Tracking** 💪 and progress monitoring
+- **Heatmap Visualization** 🔥 for habit progress
+- **Smart Recommendations** 🧠 powered by AI to optimize your schedule （TODO）
+
+## Installation 💻
+
+### 1. **Set up a Virtual Environment** 🌱
+
+To begin, create and activate a virtual environment for the project:
+
+```
 python -m venv .venv
-.\.venv\Scripts\activate
+```
+
+- **Windows**:
+
+  ```
+  .\.venv\Scripts\activate
+  ```
+
+- **macOS/Linux**:
+
+  ```
+  source .venv/bin/activate
+  ```
+
+### 2. **Install Dependencies** 🔧
+
+Next, install the required dependencies using `pip`:
+
+```
 pip install -r requirements.txt
 ```
 
-## Run
+This will install **FastAPI**, **SQLModel**, **Jinja2**, **HTMX**, and other necessary libraries.
 
-```bash
-uvicorn app.main:app --reload
+### 3. Init Database 🔄
+
+The app **auto-initializes the SQLite database** on startup. If you want to manually manage migrations or customize the database location
+
+To apply database migrations or initialize the database:
+
 ```
-
-Open `http://127.0.0.1:8000`.
-
-## Database
-
-The app auto-initializes the SQLite database on startup. You can also run:
-
-```bash
 python manage.py migrate
 ```
 
-Set `LIFEOS_DATABASE_URL` to override the database location (default: `sqlite:///lifeos.db`).
+------
 
-For schema changes, create a new Alembic revision and apply it with `python manage.py migrate`.
+## Running the App 🚀
 
-## App Info
+Once dependencies are installed, you can start the application:
 
-Set `LIFEOS_VERSION` and `LIFEOS_DEVELOPER_ID` to override the version and developer info.
+```
+uvicorn app.main:app --reload
+```
 
-## Delight Choices
+This will start the app on the default port `8000`. Open your browser and navigate to:
 
-- D1 计划-日志自动对齐：成本低、直接提升日志补记效率。
-- D3 过载预警：快速发现过量计划与低完成率风险。
-
+```
+http://127.0.0.1:8000
+```
