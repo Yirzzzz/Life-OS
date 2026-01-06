@@ -87,6 +87,202 @@ def _week_start(target_date: date) -> date:
     return target_date - timedelta(days=target_date.weekday())
 
 
+def _month_start(target_date: date) -> date:
+    return date(target_date.year, target_date.month, 1)
+
+
+def _shift_month(target_date: date, delta: int) -> date:
+    year = target_date.year + (target_date.month - 1 + delta) // 12
+    month = (target_date.month - 1 + delta) % 12 + 1
+    return date(year, month, 1)
+
+
+def _month_end(target_date: date) -> date:
+    return _shift_month(target_date, 1) - timedelta(days=1)
+
+
+def _heatmap_color(rate: Optional[float]) -> str:
+    if rate is None:
+        return "bg-slate-100"
+    if rate >= 0.67:
+        return "bg-emerald-500"
+    if rate >= 0.34:
+        return "bg-emerald-300"
+    if rate > 0:
+        return "bg-emerald-100"
+    return "bg-slate-100"
+
+
+def _habit_progress_summary(
+    session: Session, anchor_date: date, weeks: int = 6
+) -> Dict[str, Any]:
+    habits = session.exec(
+        select(HabitTemplate).where(HabitTemplate.active == True)  # noqa: E712
+    ).all()
+    if not habits:
+        return {
+            "weeks": [],
+            "weeks_count": weeks,
+            "anchor_month_label": anchor_date.strftime("%Y-%m"),
+            "week_rate_pct": 0,
+            "week_completed_days": 0,
+            "week_eligible_days": 0,
+            "month_rate_pct": 0,
+            "month_completed_days": 0,
+            "month_eligible_days": 0,
+            "since_days": 0,
+            "since_rate_pct": 0,
+        }
+
+    habit_map = {habit.id: habit for habit in habits}
+    habit_ids = list(habit_map.keys())
+
+    end_week_start = _week_start(anchor_date)
+    start_week_start = end_week_start - timedelta(days=(weeks - 1) * 7)
+    end_date = end_week_start + timedelta(days=6)
+    month_start = _month_start(anchor_date)
+    earliest_start = min(
+        (habit.start_date or date(2026, 1, 1) for habit in habits),
+        default=date(2026, 1, 1),
+    )
+    stats_start = min(start_week_start, month_start, earliest_start)
+
+    plans = session.exec(
+        select(DailyPlan).where(DailyPlan.date >= stats_start, DailyPlan.date <= end_date)
+    ).all()
+    plan_by_id = {plan.id: plan.date for plan in plans}
+    plan_ids = list(plan_by_id.keys())
+
+    daily_has: Dict[int, set[date]] = {}
+    daily_done: Dict[int, set[date]] = {}
+    weekly_day_has: Dict[int, set[date]] = {}
+    weekly_done: Dict[int, set[date]] = {}
+
+    if plan_ids and habit_ids:
+        items = session.exec(
+            select(PlanItem).where(
+                PlanItem.daily_plan_id.in_(plan_ids),
+                PlanItem.linked_habit_id.in_(habit_ids),
+            )
+        ).all()
+        for item in items:
+            plan_date = plan_by_id.get(item.daily_plan_id)
+            if not plan_date:
+                continue
+            habit = habit_map.get(item.linked_habit_id)
+            if not habit:
+                continue
+            start_date = habit.start_date or date(2026, 1, 1)
+            if plan_date < start_date:
+                continue
+            if habit.frequency == "weekly":
+                week_key = _week_start(plan_date)
+                weekly_day_has.setdefault(habit.id, set()).add(plan_date)
+                if item.completed_at:
+                    weekly_done.setdefault(habit.id, set()).add(week_key)
+            else:
+                daily_has.setdefault(habit.id, set()).add(plan_date)
+                if item.completed_at:
+                    daily_done.setdefault(habit.id, set()).add(plan_date)
+
+    daily_stats: Dict[date, Dict[str, int]] = {}
+    heatmap_cells: List[Dict[str, Any]] = []
+    for offset in range((end_date - stats_start).days + 1):
+        current_date = stats_start + timedelta(days=offset)
+        eligible = 0
+        completed = 0
+        for habit in habits:
+            start_date = habit.start_date or date(2026, 1, 1)
+            if current_date < start_date:
+                continue
+            if habit.frequency == "weekly":
+                week_key = _week_start(current_date)
+                if current_date not in weekly_day_has.get(habit.id, set()):
+                    continue
+                eligible += 1
+                if week_key in weekly_done.get(habit.id, set()):
+                    completed += 1
+            else:
+                if current_date not in daily_has.get(habit.id, set()):
+                    continue
+                eligible += 1
+                if current_date in daily_done.get(habit.id, set()):
+                    completed += 1
+        rate = (completed / eligible) if eligible else None
+        daily_stats[current_date] = {"eligible": eligible, "completed": completed}
+        heatmap_cells.append(
+            {
+                "date": current_date.isoformat(),
+                "rate": rate,
+                "color": _heatmap_color(rate),
+            }
+        )
+
+    weeks_rows: List[List[Dict[str, Any]]] = []
+    heatmap_cells_trimmed = heatmap_cells[
+        (start_week_start - stats_start).days : (end_date - stats_start).days + 1
+    ]
+    for i in range(0, len(heatmap_cells_trimmed), 7):
+        weeks_rows.append(heatmap_cells_trimmed[i : i + 7])
+
+    def _period_summary(dates: List[date]) -> tuple[int, int, int]:
+        completed_days = 0
+        eligible_days = 0
+        for d in dates:
+            stats = daily_stats.get(d)
+            if not stats or stats["eligible"] == 0:
+                continue
+            eligible_days += 1
+            if stats["completed"] == stats["eligible"]:
+                completed_days += 1
+        rate_pct = int(round((completed_days / eligible_days) * 100)) if eligible_days else 0
+        return rate_pct, completed_days, eligible_days
+
+    week_start = _week_start(anchor_date)
+    week_dates = [week_start + timedelta(days=i) for i in range(7)]
+    week_rate_pct, week_completed_days, week_eligible_days = _period_summary(week_dates)
+
+    month_dates = [
+        month_start + timedelta(days=i)
+        for i in range((anchor_date - month_start).days + 1)
+    ]
+    month_rate_pct, month_completed_days, month_eligible_days = _period_summary(month_dates)
+
+    since_dates = [
+        earliest_start + timedelta(days=i)
+        for i in range((anchor_date - earliest_start).days + 1)
+    ]
+    since_rate_sum = 0.0
+    since_rate_days = 0
+    since_completed_days = 0
+    for d in since_dates:
+        stats = daily_stats.get(d)
+        if not stats or stats["eligible"] == 0:
+            continue
+        rate = stats["completed"] / stats["eligible"]
+        since_rate_sum += rate
+        since_rate_days += 1
+        if stats["completed"] == stats["eligible"]:
+            since_completed_days += 1
+    since_rate_pct = (
+        int(round((since_rate_sum / since_rate_days) * 100)) if since_rate_days else 0
+    )
+
+    return {
+        "weeks": weeks_rows,
+        "weeks_count": weeks,
+        "anchor_month_label": anchor_date.strftime("%Y-%m"),
+        "week_rate_pct": week_rate_pct,
+        "week_completed_days": week_completed_days,
+        "week_eligible_days": week_eligible_days,
+        "month_rate_pct": month_rate_pct,
+        "month_completed_days": month_completed_days,
+        "month_eligible_days": month_eligible_days,
+        "since_days": since_completed_days,
+        "since_rate_pct": since_rate_pct,
+    }
+
+
 def _sync_plan_items(session: Session, plan: DailyPlan) -> None:
     items = session.exec(select(PlanItem).where(PlanItem.daily_plan_id == plan.id)).all()
     existing_habit_ids = {item.linked_habit_id for item in items if item.linked_habit_id}
@@ -223,9 +419,19 @@ def _parse_date_with_notice(value: Optional[str], fallback: date) -> tuple[date,
 
 @router.get("/", response_class=HTMLResponse)
 @router.get("/dashboard", response_class=HTMLResponse)
-def dashboard(request: Request) -> Response:
+def dashboard(request: Request, habit_month: Optional[str] = None) -> Response:
     session = _get_session(request)
     today = _today()
+    anchor_date = today
+    if habit_month:
+        try:
+            month_start = datetime.strptime(habit_month, "%Y-%m").date()
+            anchor_date = _month_end(month_start)
+        except ValueError:
+            anchor_date = today
+    anchor_month_start = _month_start(anchor_date)
+    prev_month = _shift_month(anchor_month_start, -1).strftime("%Y-%m")
+    next_month = _shift_month(anchor_month_start, 1).strftime("%Y-%m")
     periods = _get_periods(session)
     log = _ensure_day_log(session, today)
     period_rows = _build_period_rows(log, periods)
@@ -235,6 +441,7 @@ def dashboard(request: Request) -> Response:
     completed = len([item for item in items if item.completed_at])
     habits = session.exec(select(HabitTemplate).where(HabitTemplate.active == True)).all()  # noqa: E712
     suggestions = session.exec(select(Suggestion).where(Suggestion.status == "open")).all()
+    habit_progress = _habit_progress_summary(session, anchor_date)
 
     overload = False
     overload_reason = ""
@@ -271,6 +478,9 @@ def dashboard(request: Request) -> Response:
             "period_rows": period_rows,
             "periods": periods,
             "period_labels": _period_labels(),
+            "habit_progress": habit_progress,
+            "habit_progress_prev_month": prev_month,
+            "habit_progress_next_month": next_month,
         },
     )
 

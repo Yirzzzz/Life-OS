@@ -57,6 +57,71 @@
 
     <div class="bg-white p-5 rounded shadow-sm border border-slate-200">
       <div class="flex items-center justify-between">
+        <div class="text-base font-semibold">习惯进度摘要</div>
+        <div class="flex items-center gap-2 text-xs text-slate-500">
+          <a class="px-2 py-1 border border-slate-200 rounded" href="/dashboard?habit_month={{ habit_progress_prev_month }}">上个月</a>
+          <span>{{ habit_progress.anchor_month_label }}</span>
+          <a class="px-2 py-1 border border-slate-200 rounded" href="/dashboard?habit_month={{ habit_progress_next_month }}">下个月</a>
+        </div>
+      </div>
+      <div class="mt-4 grid md:grid-cols-3 gap-6">
+        <div class="md:col-span-2">
+          <div class="inline-grid gap-2">
+            <div class="grid grid-cols-7 gap-x-1 gap-y-2 w-fit text-[12px] text-slate-400 justify-items-center">
+              <div class="text-center">Mon</div>
+              <div class="text-center">Tue</div>
+              <div class="text-center">Wed</div>
+              <div class="text-center">Thu</div>
+              <div class="text-center">Fri</div>
+              <div class="text-center">Sat</div>
+              <div class="text-center">Sun</div>
+              {% for week in habit_progress.weeks %}
+                {% for cell in week %}
+                  <div
+                    class="h-[10px] w-[10px] rounded {{ cell.color }}"
+                    title="{{ cell.date }}{% if cell.rate is not none %} {{ (cell.rate * 100) | round(0) }}%{% endif %}"
+                  ></div>
+                {% endfor %}
+              {% endfor %}
+            </div>
+            <div class="flex items-center gap-2 text-[10px] text-slate-400">
+              <span class="h-2 w-2 rounded bg-slate-100"></span>
+              <span>0%</span>
+              <span class="h-2 w-2 rounded bg-emerald-100"></span>
+              <span>低</span>
+              <span class="h-2 w-2 rounded bg-emerald-300"></span>
+              <span>中</span>
+              <span class="h-2 w-2 rounded bg-emerald-500"></span>
+              <span>高</span>
+              <span class="ml-2 text-slate-400">最近 {{ habit_progress.weeks_count }} 周</span>
+            </div>
+          </div>
+        </div>
+        <div class="space-y-3 text-sm">
+          <div>
+            <div class="text-xs text-slate-500">本周完成率</div>
+            <div class="text-lg font-semibold">
+              {{ habit_progress.week_rate_pct }}% ({{ habit_progress.week_completed_days }}/{{ habit_progress.week_eligible_days }})
+            </div>
+          </div>
+          <div>
+            <div class="text-xs text-slate-500">本月完成率</div>
+            <div class="text-lg font-semibold">
+              {{ habit_progress.month_rate_pct }}% ({{ habit_progress.month_completed_days }}/{{ habit_progress.month_eligible_days }})
+            </div>
+          </div>
+          <div>
+            <div class="text-xs text-slate-500">从 start_date 至今</div>
+            <div class="text-sm text-slate-700">
+              已坚持 {{ habit_progress.since_days }} 天 · 平均完成率 {{ habit_progress.since_rate_pct }}%
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white p-5 rounded shadow-sm border border-slate-200">
+      <div class="flex items-center justify-between">
         <div class="text-base font-semibold">Agent 建议</div>
         <button
           class="text-sm px-3 py-1 border border-slate-300 rounded"
