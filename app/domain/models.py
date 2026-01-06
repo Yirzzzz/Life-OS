@@ -32,7 +32,6 @@ class HabitTemplate(SQLModel, table=True):
     title: str
     frequency: str
     target_per_week: int = 7
-    preferred_period: str = "morning"
     active: bool = True
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -66,6 +65,16 @@ class PlanItem(SQLModel, table=True):
     status: str = "pending"
     completed_at: Optional[datetime] = None
     note: str = ""
+
+
+class PlanItemSuppression(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    date: date
+    linked_habit_id: Optional[int] = Field(default=None, foreign_key="habit.id")
+    linked_objective_id: Optional[int] = Field(
+        default=None, foreign_key="short_term_objective.id"
+    )
+    created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class DayLog(SQLModel, table=True):

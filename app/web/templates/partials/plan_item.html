@@ -26,7 +26,7 @@
     </button>
     <button
       class="text-xs px-3 py-1 border rounded text-rose-600 border-rose-200"
-      hx-post="/plans/items/{{ item.id }}/delete"
+      hx-post="{% if item.linked_habit_id %}/habits/{{ item.linked_habit_id }}/delete{% else %}/plans/items/{{ item.id }}/delete{% endif %}"
       hx-target="closest .plan-item"
       hx-swap="outerHTML"
       hx-confirm="{% if item.linked_habit_id %}Confirm delete Habit &quot;{{ item.title }}&quot;? This will stop future weekly/daily generation.{% else %}Confirm delete Plan &quot;{{ item.title }}&quot;? This action cannot be undone.{% endif %}"

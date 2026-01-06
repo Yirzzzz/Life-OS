@@ -14,7 +14,6 @@ class HabitInput(BaseModel):
     title: str
     frequency: str
     target_per_week: int = 7
-    preferred_period: str = "morning"
     active: bool = True
 
 
@@ -40,7 +39,6 @@ class HabitCreateOrUpdateSkill(Skill):
         habit.title = data.title
         habit.frequency = data.frequency
         habit.target_per_week = data.target_per_week
-        habit.preferred_period = data.preferred_period
         habit.active = data.active
         session.add(habit)
         session.commit()

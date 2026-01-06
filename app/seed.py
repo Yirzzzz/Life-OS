@@ -56,9 +56,9 @@ def seed_db() -> None:
     session.add_all(milestones)
 
     habits = [
-        HabitTemplate(title="晨跑 20 分钟", frequency="daily", target_per_week=5, preferred_period="morning"),
-        HabitTemplate(title="阅读 30 分钟", frequency="daily", target_per_week=5, preferred_period="evening"),
-        HabitTemplate(title="周复盘", frequency="weekly", target_per_week=1, preferred_period="afternoon"),
+        HabitTemplate(title="晨跑 20 分钟", frequency="daily", target_per_week=5),
+        HabitTemplate(title="阅读 30 分钟", frequency="daily", target_per_week=5),
+        HabitTemplate(title="周复盘", frequency="weekly", target_per_week=1),
     ]
     session.add_all(habits)
     session.commit()

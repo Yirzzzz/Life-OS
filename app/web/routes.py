@@ -17,6 +17,7 @@ from app.domain.models import (
     HabitTemplate,
     Milestone,
     PlanItem,
+    PlanItemSuppression,
     ShortTermObjective,
     Settings,
     Suggestion,
@@ -92,6 +93,15 @@ def _sync_plan_items(session: Session, plan: DailyPlan) -> None:
     existing_objective_ids = {
         item.linked_objective_id for item in items if item.linked_objective_id
     }
+    suppressions = session.exec(
+        select(PlanItemSuppression).where(PlanItemSuppression.date == plan.date)
+    ).all()
+    suppressed_habit_ids = {
+        row.linked_habit_id for row in suppressions if row.linked_habit_id
+    }
+    suppressed_objective_ids = {
+        row.linked_objective_id for row in suppressions if row.linked_objective_id
+    }
     changed = False
 
     templates = session.exec(
@@ -103,6 +113,8 @@ def _sync_plan_items(session: Session, plan: DailyPlan) -> None:
         if not _template_included(template, plan.date):
             continue
         if template.id in existing_habit_ids:
+            continue
+        if template.id in suppressed_habit_ids:
             continue
         completed_at = None
         status = "pending"
@@ -145,6 +157,8 @@ def _sync_plan_items(session: Session, plan: DailyPlan) -> None:
         if obj.due_date < plan.date:
             continue
         if obj.id in existing_objective_ids:
+            continue
+        if obj.id in suppressed_objective_ids:
             continue
         session.add(
             PlanItem(
@@ -564,27 +578,34 @@ def delete_plan_item(request: Request, item_id: int) -> Response:
     item = session.exec(select(PlanItem).where(PlanItem.id == item_id)).first()
     if not item:
         return Response(status_code=404)
+    plan = session.exec(select(DailyPlan).where(DailyPlan.id == item.daily_plan_id)).first()
+    plan_date = plan.date if plan else _today()
     if item.linked_habit_id:
-        template = session.exec(
-            select(HabitTemplate).where(HabitTemplate.id == item.linked_habit_id)
+        existing = session.exec(
+            select(PlanItemSuppression).where(
+                PlanItemSuppression.date == plan_date,
+                PlanItemSuppression.linked_habit_id == item.linked_habit_id,
+            )
         ).first()
-        if template:
-            template.active = False
-            session.add(template)
-            future_items = session.exec(
-                select(PlanItem)
-                .join(DailyPlan, PlanItem.daily_plan_id == DailyPlan.id)
-                .where(
-                    PlanItem.linked_habit_id == template.id,
-                    DailyPlan.date >= _today(),
+        if not existing:
+            session.add(
+                PlanItemSuppression(
+                    date=plan_date, linked_habit_id=item.linked_habit_id
                 )
-            ).all()
-            for future_item in future_items:
-                session.delete(future_item)
-            if item not in future_items:
-                session.delete(item)
-            session.commit()
-            return Response(content="")
+            )
+    if item.linked_objective_id:
+        existing = session.exec(
+            select(PlanItemSuppression).where(
+                PlanItemSuppression.date == plan_date,
+                PlanItemSuppression.linked_objective_id == item.linked_objective_id,
+            )
+        ).first()
+        if not existing:
+            session.add(
+                PlanItemSuppression(
+                    date=plan_date, linked_objective_id=item.linked_objective_id
+                )
+            )
     session.delete(item)
     session.commit()
     return Response(content="")
@@ -596,7 +617,6 @@ def create_habit(
     title: str = Form(...),
     frequency: str = Form(...),
     target_per_week: int = Form(7),
-    preferred_period: str = Form("morning"),
 ) -> Response:
     session = _get_session(request)
     executor = _get_executor(request)
@@ -604,7 +624,6 @@ def create_habit(
         "title": title,
         "frequency": frequency,
         "target_per_week": target_per_week,
-        "preferred_period": preferred_period,
         "active": True,
     }
     try:
@@ -618,6 +637,28 @@ def create_habit(
     plan = _ensure_daily_plan(session, _today())
     _sync_plan_items(session, plan)
     return Response(status_code=303, headers={"Location": "/plans"})
+
+
+@router.post("/habits/{habit_id}/delete", response_class=HTMLResponse)
+def delete_habit(request: Request, habit_id: int) -> Response:
+    session = _get_session(request)
+    habit = session.exec(select(HabitTemplate).where(HabitTemplate.id == habit_id)).first()
+    if not habit:
+        return Response(status_code=404)
+    habit.active = False
+    session.add(habit)
+    future_items = session.exec(
+        select(PlanItem)
+        .join(DailyPlan, PlanItem.daily_plan_id == DailyPlan.id)
+        .where(
+            PlanItem.linked_habit_id == habit.id,
+            DailyPlan.date >= _today(),
+        )
+    ).all()
+    for future_item in future_items:
+        session.delete(future_item)
+    session.commit()
+    return Response(content="")
 
 
 @router.get("/logs", response_class=HTMLResponse)
