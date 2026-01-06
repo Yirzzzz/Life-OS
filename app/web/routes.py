@@ -5,11 +5,12 @@ from typing import Any, Dict, List, Optional
 
 import markdown
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
 
 from app.agent.executor import Executor
+from app.config import APP_VERSION, DEVELOPER_ID
 from app.domain.models import (
     DayLog,
     DailyPlan,
@@ -26,6 +27,7 @@ from app.domain.models import (
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/web/templates")
+templates.env.globals.update(app_version=APP_VERSION, developer_id=DEVELOPER_ID)
 
 
 def _get_session(request: Request) -> Session:
@@ -714,6 +716,11 @@ def dashboard(request: Request, habit_month: Optional[str] = None) -> Response:
             "habit_progress_next_month": next_month,
         },
     )
+
+
+@router.get("/api/info", response_class=JSONResponse)
+def api_info() -> Response:
+    return JSONResponse({"version": APP_VERSION, "developer": DEVELOPER_ID})
 
 
 @router.get("/goals", response_class=HTMLResponse)

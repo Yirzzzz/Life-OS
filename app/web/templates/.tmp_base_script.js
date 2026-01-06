@@ -3,7 +3,7 @@
         en: {
           common: {
             app_name: "Life OS",
-            app_tagline: "Local-first Life OS v1",
+            app_tagline: "Life OS v1",
             app_version: "Life OS v1",
             loading: "Loading...",
             menu: "Menu",
