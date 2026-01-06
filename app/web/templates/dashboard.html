@@ -172,32 +172,66 @@
             </div>
           </div>
         </div>
-        <div class="space-y-3 text-sm">
-          <div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+          <div class="rounded border border-slate-200 bg-white p-3">
             <div class="text-xs text-slate-500" data-i18n="dashboard.habit_progress.daily_week_rate"></div>
-            <div class="text-lg font-semibold">
-              {{ habit_progress.daily_week_rate_pct }}% ({{ habit_progress.daily_week_done }}/{{ habit_progress.daily_week_total }})
-            </div>
+            {% if habit_progress.daily_week_total %}
+              <div class="mt-2 text-3xl font-semibold leading-none">
+                {{ habit_progress.daily_week_rate_pct }}%
+              </div>
+              <div class="mt-1 text-xs text-slate-400">
+                {{ habit_progress.daily_week_done }}/{{ habit_progress.daily_week_total }}
+              </div>
+            {% else %}
+              <div class="mt-2 text-3xl font-semibold leading-none">--</div>
+              <div class="mt-1 text-xs text-slate-400" data-i18n="dashboard.habit_progress.no_items"></div>
+            {% endif %}
           </div>
-          <div>
+          <div class="rounded border border-slate-200 bg-white p-3">
             <div class="text-xs text-slate-500" data-i18n="dashboard.habit_progress.weekly_week_rate"></div>
-            <div class="text-lg font-semibold">
-              {{ habit_progress.weekly_week_done }}/{{ habit_progress.weekly_week_total }}
-            </div>
+            {% if habit_progress.weekly_week_total %}
+              {% set weekly_week_pct = (habit_progress.weekly_week_done / habit_progress.weekly_week_total * 100) | round(0) %}
+              <div class="mt-2 text-3xl font-semibold leading-none">
+                {{ habit_progress.weekly_week_done }}/{{ habit_progress.weekly_week_total }}
+              </div>
+              <div class="mt-1 text-xs text-slate-400">
+                {{ weekly_week_pct }}%
+              </div>
+            {% else %}
+              <div class="mt-2 text-3xl font-semibold leading-none">--</div>
+              <div class="mt-1 text-xs text-slate-400" data-i18n="dashboard.habit_progress.no_items"></div>
+            {% endif %}
           </div>
-          <div>
+          <div class="rounded border border-slate-200 bg-white p-3">
             <div class="text-xs text-slate-500" data-i18n="dashboard.habit_progress.daily_month_rate"></div>
-            <div class="text-lg font-semibold">
-              {{ habit_progress.daily_month_rate_pct }}% ({{ habit_progress.daily_month_done }}/{{ habit_progress.daily_month_total }})
-            </div>
+            {% if habit_progress.daily_month_total %}
+              <div class="mt-2 text-3xl font-semibold leading-none">
+                {{ habit_progress.daily_month_rate_pct }}%
+              </div>
+              <div class="mt-1 text-xs text-slate-400">
+                {{ habit_progress.daily_month_done }}/{{ habit_progress.daily_month_total }}
+              </div>
+            {% else %}
+              <div class="mt-2 text-3xl font-semibold leading-none">--</div>
+              <div class="mt-1 text-xs text-slate-400" data-i18n="dashboard.habit_progress.no_items"></div>
+            {% endif %}
           </div>
-          <div>
+          <div class="rounded border border-slate-200 bg-white p-3">
             <div class="text-xs text-slate-500" data-i18n="dashboard.habit_progress.weekly_month_rate"></div>
-            <div class="text-lg font-semibold">
-              {{ habit_progress.weekly_month_done }}/{{ habit_progress.weekly_month_total }}
-            </div>
+            {% if habit_progress.weekly_month_total %}
+              {% set weekly_month_pct = (habit_progress.weekly_month_done / habit_progress.weekly_month_total * 100) | round(0) %}
+              <div class="mt-2 text-3xl font-semibold leading-none">
+                {{ habit_progress.weekly_month_done }}/{{ habit_progress.weekly_month_total }}
+              </div>
+              <div class="mt-1 text-xs text-slate-400">
+                {{ weekly_month_pct }}%
+              </div>
+            {% else %}
+              <div class="mt-2 text-3xl font-semibold leading-none">--</div>
+              <div class="mt-1 text-xs text-slate-400" data-i18n="dashboard.habit_progress.no_items"></div>
+            {% endif %}
           </div>
-          <div>
+          <div class="sm:col-span-2">
             <div class="text-xs text-slate-500" data-i18n="dashboard.habit_progress.since_start"></div>
             <div class="text-sm text-slate-700" data-i18n="dashboard.habit_progress.since_summary" data-i18n-params='{"days":"{{ habit_progress.since_days }}","rate":"{{ habit_progress.since_rate_pct }}"}'></div>
           </div>
