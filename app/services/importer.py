@@ -46,6 +46,8 @@ def import_json(session: Session, payload: Dict[str, List[dict]], mode: str) -> 
     for key, model in MODEL_MAP.items():
         items = payload.get(key, [])
         for raw in items:
+            if key == "habits" and not raw.get("start_date"):
+                raw["start_date"] = "2026-01-01"
             instance = model(**raw)
             if mode == "merge":
                 session.merge(instance)

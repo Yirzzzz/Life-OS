@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from pydantic import BaseModel
+from datetime import date
 from sqlmodel import Session, select
 
 from app.agent.base import Skill
@@ -36,6 +37,7 @@ class HabitCreateOrUpdateSkill(Skill):
                 raise ValueError("Habit not found")
         else:
             habit = HabitTemplate(title=data.title, frequency=data.frequency)
+            habit.start_date = date.today()
         habit.title = data.title
         habit.frequency = data.frequency
         habit.target_per_week = data.target_per_week

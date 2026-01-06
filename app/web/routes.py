@@ -112,6 +112,9 @@ def _sync_plan_items(session: Session, plan: DailyPlan) -> None:
     for template in templates:
         if not _template_included(template, plan.date):
             continue
+        start_date = template.start_date or date(2026, 1, 1)
+        if plan.date < start_date:
+            continue
         if template.id in existing_habit_ids:
             continue
         if template.id in suppressed_habit_ids:

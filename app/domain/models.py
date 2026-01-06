@@ -32,6 +32,7 @@ class HabitTemplate(SQLModel, table=True):
     title: str
     frequency: str
     target_per_week: int = 7
+    start_date: date = Field(default_factory=date.today)
     active: bool = True
     created_at: datetime = Field(default_factory=datetime.utcnow)
 

@@ -18,6 +18,14 @@ def init_db() -> None:
             conn.exec_driver_sql(
                 "ALTER TABLE planitem ADD COLUMN linked_objective_id INTEGER"
             )
+        habit_columns = {
+            row[1] for row in conn.exec_driver_sql("PRAGMA table_info(habit)").fetchall()
+        }
+        if "start_date" not in habit_columns:
+            conn.exec_driver_sql("ALTER TABLE habit ADD COLUMN start_date DATE")
+        conn.exec_driver_sql(
+            "UPDATE habit SET start_date = '2026-01-01' WHERE start_date IS NULL"
+        )
 
 
 def get_session() -> Session:
