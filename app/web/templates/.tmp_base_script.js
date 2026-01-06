@@ -1,82 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Life OS v1</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
-    <link
-      rel="stylesheet"
-      href="https://cdn.jsdelivr.net/npm/@fontsource/space-grotesk@5.0.18/index.css"
-    />
-    <style>
-      body {
-        font-family: "Space Grotesk", ui-sans-serif, system-ui;
-      }
-      .emoji {
-        font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", emoji,
-          sans-serif;
-        line-height: 1;
-      }
-    </style>
-  </head>
-  <body class="bg-slate-100 text-slate-900">
-    <div class="min-h-screen flex">
-      <aside
-        id="sidebar"
-        class="bg-white w-64 border-r border-slate-200 hidden md:flex flex-col"
-      >
-        <div class="px-6 py-5 text-xl font-semibold" data-i18n="common.app_name"></div>
-        <nav class="flex-1 px-4 space-y-2 text-sm">
-          <a class="block px-3 py-2 rounded hover:bg-slate-100" href="/dashboard" data-i18n="nav.dashboard"></a>
-          <a class="block px-3 py-2 rounded hover:bg-slate-100" href="/goals" data-i18n="nav.goals"></a>
-          <a class="block px-3 py-2 rounded hover:bg-slate-100" href="/plans" data-i18n="nav.plans"></a>
-          <a class="block px-3 py-2 rounded hover:bg-slate-100" href="/logs" data-i18n="nav.logs"></a>
-          <a class="block px-3 py-2 rounded hover:bg-slate-100" href="/reviews" data-i18n="nav.reviews"></a>
-          <a class="block px-3 py-2 rounded hover:bg-slate-100" href="/settings" data-i18n="nav.settings"></a>
-        </nav>
-        <div class="px-4 py-4 text-xs text-slate-500" data-i18n="common.app_tagline"></div>
-      </aside>
-      <div class="flex-1 flex flex-col">
-        <header class="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
-          <div class="flex items-center gap-3">
-            <button
-              class="md:hidden inline-flex items-center justify-center rounded border border-slate-300 px-2 py-1 text-sm"
-              onclick="document.getElementById('sidebar').classList.toggle('hidden')"
-            >
-              <span data-i18n="common.menu"></span>
-            </button>
-            <div class="font-semibold text-lg">{% block page_title %}{% endblock %}</div>
-          </div>
-          <div class="flex items-center gap-3 text-sm text-slate-500">
-            <div data-i18n="common.app_version"></div>
-            <div class="flex items-center gap-1 border border-slate-200 rounded p-1">
-              <button
-                type="button"
-                class="px-2 py-1 rounded text-xs"
-                data-lang="zh"
-                data-i18n="lang.cn"
-              ></button>
-              <button
-                type="button"
-                class="px-2 py-1 rounded text-xs"
-                data-lang="en"
-                data-i18n="lang.en"
-              ></button>
-            </div>
-          </div>
-        </header>
-        <main class="flex-1 px-6 py-6">
-          <div class="mx-auto w-full max-w-6xl">{% block content %}{% endblock %}</div>
-        </main>
-      </div>
-    </div>
 
-    <div id="hx-indicator" class="fixed inset-0 hidden items-center justify-center bg-slate-900/30">
-      <div class="bg-white px-4 py-3 rounded shadow text-sm" data-i18n="common.loading"></div>
-    </div>
-    <script>
       const I18N = {
         en: {
           common: {
@@ -471,6 +393,7 @@
       }
 
       function emojiForProgress(progress) {
+        if (progress <= 0) return "\u{1F61E}";
         if (progress >= 100) return "\u{1F601}";
         if (progress >= 60) return "\u{1F60A}";
         if (progress >= 20) return "\u{1F4AA}";
@@ -527,31 +450,7 @@
             applyEmoji(document);
           });
         });
-        const observer = new MutationObserver((mutations) => {
-          mutations.forEach((mutation) => {
-            if (mutation.type === "childList") {
-              mutation.addedNodes.forEach((node) => {
-                if (node.nodeType === 1) {
-                  applyEmoji(node);
-                }
-              });
-            } else if (mutation.type === "attributes") {
-              const target = mutation.target;
-              if (target && target.nodeType === 1) {
-                applyEmoji(target);
-              }
-            }
-          });
-        });
-        observer.observe(document.body, {
-          subtree: true,
-          childList: true,
-          attributes: true,
-          attributeFilter: ["data-emoji", "data-emoji-mode", "data-progress", "data-status"],
-        });
         applyTranslations(document);
         applyEmoji(document);
       });
-    </script>
-  </body>
-</html>
+    

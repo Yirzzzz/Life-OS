@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Dict
+from datetime import date, datetime
+from typing import Any, Dict, Iterable
 
 from pydantic import ValidationError
 from sqlmodel import Session
@@ -13,6 +14,17 @@ from app.domain.models import AgentRunLog
 class Executor:
     def __init__(self, registry: SkillRegistry) -> None:
         self.registry = registry
+
+    def _make_json_safe(self, value: Any) -> Any:
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, date):
+            return value.isoformat()
+        if isinstance(value, dict):
+            return {key: self._make_json_safe(val) for key, val in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [self._make_json_safe(val) for val in value]
+        return value
 
     def execute(self, session: Session, skill_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         start = time.time()
@@ -33,8 +45,8 @@ class Executor:
             duration_ms = int((time.time() - start) * 1000)
             log = AgentRunLog(
                 skill_name=skill_name,
-                input_json=payload,
-                output_json=output_payload,
+                input_json=self._make_json_safe(payload),
+                output_json=self._make_json_safe(output_payload),
                 status=status,
                 error=error,
                 duration_ms=duration_ms,

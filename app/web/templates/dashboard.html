@@ -34,7 +34,19 @@
     <div class="grid md:grid-cols-3 gap-6">
       <div class="bg-white p-5 rounded shadow-sm border border-slate-200">
         <div class="text-xs text-slate-500" data-i18n="dashboard.today_plan"></div>
-        <div class="text-3xl font-semibold">{{ completed }}/{{ plan_items|length }}</div>
+        <div class="text-3xl font-semibold flex items-center gap-2">
+          <span>{{ completed }}/{{ plan_items|length }}</span>
+          {% set plan_progress = (completed / plan_items|length * 100) if plan_items|length else 0 %}
+          <span class="text-xl">
+            {% if plan_progress >= 100 %}
+              😃
+            {% elif plan_progress >= 50 %}
+              💪
+            {% else %}
+              😞
+            {% endif %}
+          </span>
+        </div>
         <div class="mt-3 text-sm">
           <a class="text-blue-600" href="/plans?target_date={{ today }}" data-i18n="dashboard.view_details"></a>
         </div>
@@ -42,7 +54,16 @@
 
       <div class="bg-white p-5 rounded shadow-sm border border-slate-200">
         <div class="text-xs text-slate-500" data-i18n="dashboard.today_log"></div>
-        <div class="text-3xl font-semibold" data-i18n="{{ 'dashboard.log_status.has' if log_has_content else 'dashboard.log_status.empty' }}"></div>
+        <div class="text-3xl font-semibold flex items-center gap-2">
+          <span data-i18n="{{ 'dashboard.log_status.has' if log_has_content else 'dashboard.log_status.empty' }}"></span>
+          <span class="text-xl">
+            {% if log_has_content %}
+              😄
+            {% else %}
+              😞
+            {% endif %}
+          </span>
+        </div>
         <div class="mt-3 text-sm">
           <a class="text-blue-600" href="/logs?target_date={{ today }}" data-i18n="dashboard.write_log"></a>
         </div>
@@ -77,15 +98,15 @@
       </div>
     </div>
 
-    <div class="bg-white p-5 rounded shadow-sm border border-slate-200">
-      <div class="flex items-center justify-between">
-        <div class="text-base font-semibold" data-i18n="dashboard.habit_progress.title"></div>
-        <div class="flex items-center gap-2 text-xs text-slate-500">
-          <a class="px-2 py-1 border border-slate-200 rounded" href="/dashboard?habit_month={{ habit_progress_prev_month }}" data-i18n="dashboard.habit_progress.prev_month"></a>
-          <span>{{ habit_progress.anchor_month_label }}</span>
-          <a class="px-2 py-1 border border-slate-200 rounded" href="/dashboard?habit_month={{ habit_progress_next_month }}" data-i18n="dashboard.habit_progress.next_month"></a>
+      <div class="bg-white p-5 rounded shadow-sm border border-slate-200">
+        <div class="flex items-center justify-between">
+          <div class="text-base font-semibold" data-i18n="dashboard.habit_progress.title"></div>
+          <div class="flex items-center gap-2 text-xs text-slate-500">
+            <a class="px-2 py-1 border border-slate-200 rounded" href="/dashboard?habit_month={{ habit_progress_prev_month }}" data-i18n="dashboard.habit_progress.prev_month"></a>
+            <span>{{ habit_progress.anchor_month_label }}</span>
+            <a class="px-2 py-1 border border-slate-200 rounded" href="/dashboard?habit_month={{ habit_progress_next_month }}" data-i18n="dashboard.habit_progress.next_month"></a>
+          </div>
         </div>
-      </div>
       <div class="mt-4 grid md:grid-cols-3 gap-6">
         <div class="md:col-span-2">
           <div class="inline-grid gap-2">
@@ -121,13 +142,39 @@
         </div>
         <div class="space-y-3 text-sm">
           <div>
-            <div class="text-xs text-slate-500" data-i18n="dashboard.habit_progress.week_rate"></div>
+            <div class="text-xs text-slate-500 flex items-center gap-2">
+              <span data-i18n="dashboard.habit_progress.week_rate"></span>
+              <span class="text-base">
+                {% if habit_progress.week_rate_pct >= 100 %}
+                  😁
+                {% elif habit_progress.week_rate_pct >= 60 %}
+                  😊
+                {% elif habit_progress.week_rate_pct >= 20 %}
+                  💪
+                {% else %}
+                  😞
+                {% endif %}
+              </span>
+            </div>
             <div class="text-lg font-semibold">
               {{ habit_progress.week_rate_pct }}% ({{ habit_progress.week_completed_days }}/{{ habit_progress.week_eligible_days }})
             </div>
           </div>
           <div>
-            <div class="text-xs text-slate-500" data-i18n="dashboard.habit_progress.month_rate"></div>
+            <div class="text-xs text-slate-500 flex items-center gap-2">
+              <span data-i18n="dashboard.habit_progress.month_rate"></span>
+              <span class="text-base">
+                {% if habit_progress.month_rate_pct >= 100 %}
+                  😁
+                {% elif habit_progress.month_rate_pct >= 60 %}
+                  😊
+                {% elif habit_progress.month_rate_pct >= 20 %}
+                  💪
+                {% else %}
+                  😞
+                {% endif %}
+              </span>
+            </div>
             <div class="text-lg font-semibold">
               {{ habit_progress.month_rate_pct }}% ({{ habit_progress.month_completed_days }}/{{ habit_progress.month_eligible_days }})
             </div>

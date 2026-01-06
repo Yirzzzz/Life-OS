@@ -31,6 +31,7 @@ class HabitTemplate(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     title: str
     frequency: str
+    preferred_period: str = "unknown"
     target_per_week: int = 7
     start_date: date = Field(default_factory=date.today)
     active: bool = True
