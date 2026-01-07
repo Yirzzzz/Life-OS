@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import markdown
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Form, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
@@ -536,6 +537,38 @@ def _parse_date_with_notice(value: Optional[str], fallback: date) -> tuple[date,
         return fallback, True
 
 
+def _mask_key(value: str) -> str:
+    value = (value or "").strip()
+    if not value:
+        return ""
+    if len(value) <= 8:
+        return "*" * len(value)
+    return f"{value[:4]}...{value[-4:]}"
+
+
+def _env_file_path() -> Path:
+    return Path(__file__).resolve().parents[2] / ".env"
+
+
+def _write_env_value(key: str, value: str) -> None:
+    env_path = _env_file_path()
+    lines: List[str] = []
+    if env_path.exists():
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+    updated = False
+    for idx, line in enumerate(lines):
+        if not line or line.lstrip().startswith("#") or "=" not in line:
+            continue
+        existing_key = line.split("=", 1)[0].strip()
+        if existing_key == key:
+            lines[idx] = f"{key}={value}"
+            updated = True
+            break
+    if not updated:
+        lines.append(f"{key}={value}")
+    env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def _day_bounds(target_date: date) -> tuple[datetime, datetime]:
     start = datetime.combine(target_date, datetime.min.time())
     end = start + timedelta(days=1)
@@ -667,7 +700,8 @@ def dashboard(request: Request, habit_month: Optional[str] = None) -> Response:
                         },
                     )
                 except RuntimeError:
-                    suggestion = None
+                    # Keep the existing card instead of dropping the section entirely.
+                    pass
                 else:
                     suggestion = _weekly_reflection_for_date(session, today)
         if not suggestion:
@@ -1502,24 +1536,43 @@ def decide_weekly_reflection(
 def regenerate_weekly_reflection(
     request: Request,
     target_date: Optional[str] = Form(None),
+    as_of: Optional[str] = Form(None),
     window_days: int = Form(7),
+    mode: str = Query("llm"),
+    lang: Optional[str] = Form(None),
 ) -> Response:
     session = _get_session(request)
     executor = _get_executor(request)
-    as_of = _parse_date(target_date, _today())
+    date_value = as_of or target_date
+    as_of = _parse_date(date_value, _today())
     suggestion = _weekly_reflection_for_date(session, as_of)
-    lang = _get_locale(request)
-    payload = {"as_of": as_of, "window_days": window_days, "lang": lang}
+    lang_value = (lang or _get_locale(request)).strip()
+    if lang_value not in {"zh", "en"}:
+        lang_value = _get_locale(request)
+    normalized_mode = "rules" if mode == "rules" else "llm"
+    payload = {
+        "as_of": as_of,
+        "window_days": window_days,
+        "lang": lang_value,
+        "mode": normalized_mode,
+    }
     if suggestion:
         payload["existing_id"] = suggestion.id
     payload["trigger"] = "manual_regenerate"
     try:
         executor.execute(session, "review.weekly_reflection", payload)
     except RuntimeError as exc:
+        suggestion = _weekly_reflection_for_date(session, as_of)
+        if suggestion:
+            card = _format_weekly_reflection_card(suggestion)
+            card["notice"] = str(exc)
+            return templates.TemplateResponse(
+                "partials/weekly_reflection.html",
+                {"request": request, "weekly_reflection": card},
+            )
         return templates.TemplateResponse(
             "partials/error.html",
             {"request": request, "message": str(exc), "retry": "/dashboard"},
-            status_code=400,
         )
     suggestion = _weekly_reflection_for_date(session, as_of)
     if not suggestion:
@@ -1592,8 +1645,10 @@ def settings(request: Request) -> Response:
         else "Qwen/Qwen2.5-Coder-32B-Instruct"
     )
     env_key = os.getenv("LIFEOS_LLM_API_KEY", "").strip()
-    llm_key_present = bool(env_key or (settings_row and settings_row.llm_api_key))
+    llm_key_value = env_key or (settings_row.llm_api_key if settings_row else "")
+    llm_key_present = bool(llm_key_value)
     llm_key_source = "env" if env_key else "settings" if llm_key_present else ""
+    llm_key_masked = _mask_key(llm_key_value)
     return templates.TemplateResponse(
         "settings.html",
         {
@@ -1602,6 +1657,7 @@ def settings(request: Request) -> Response:
             "llm_model": llm_model,
             "llm_key_present": llm_key_present,
             "llm_key_source": llm_key_source,
+            "llm_key_masked": llm_key_masked,
             "llm_status": llm_status,
         },
     )
@@ -1634,10 +1690,14 @@ def update_llm_settings(
     settings_row = session.exec(select(Settings).where(Settings.id == 1)).first()
     if not settings_row:
         settings_row = Settings(id=1, periods_json=_get_periods(session))
-    if llm_api_key.strip():
-        settings_row.llm_api_key = llm_api_key.strip()
+    key_value = llm_api_key.strip()
+    if key_value:
+        settings_row.llm_api_key = key_value
     settings_row.llm_model = llm_model
     try:
+        if key_value:
+            _write_env_value("LIFEOS_LLM_API_KEY", key_value)
+            os.environ["LIFEOS_LLM_API_KEY"] = key_value
         session.add(settings_row)
         session.commit()
     except Exception as exc:  # noqa: BLE001
@@ -1650,6 +1710,7 @@ def update_llm_settings(
                 "periods": periods,
                 "llm_model": llm_model,
                 "llm_key_present": llm_key_present,
+                "llm_key_masked": _mask_key(settings_row.llm_api_key),
                 "llm_status": "error",
                 "llm_message": str(exc),
             },

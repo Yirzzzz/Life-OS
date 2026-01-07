@@ -24,6 +24,9 @@
           {% if llm_key_source %}
             <div class="text-xs text-slate-500" data-i18n="settings.llm.key_source.{{ llm_key_source }}"></div>
           {% endif %}
+          {% if llm_key_masked %}
+            <div class="text-xs text-slate-500">Key: {{ llm_key_masked }}</div>
+          {% endif %}
         {% endif %}
       </div>
       <input

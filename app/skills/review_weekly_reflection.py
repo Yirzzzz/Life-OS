@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+import logging
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 import os
-from typing import Tuple
 from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel
@@ -13,6 +14,15 @@ from app.agent.base import Skill
 from app.data.repo import get_settings
 from app.domain.models import DayLog, DailyPlan, HabitTemplate, PlanItem, Suggestion
 
+logger = logging.getLogger(__name__)
+LLM_PROVIDER = "ModelScope"
+LLM_BASE_URL = "https://api-inference.modelscope.cn/v1"
+
+
+@dataclass
+class LlmCallError(Exception):
+    details: Dict[str, Any]
+
 
 class WeeklyReflectionInput(BaseModel):
     as_of: date
@@ -20,6 +30,7 @@ class WeeklyReflectionInput(BaseModel):
     lang: str = "zh"
     existing_id: Optional[int] = None
     trigger: Optional[str] = None
+    mode: Optional[str] = None
 
 
 class WeeklyReflectionOutput(BaseModel):
@@ -109,6 +120,7 @@ class ReviewWeeklyReflectionSkill(Skill):
 
         generator_mode = "rules"
         output = rule_payload
+        force_rules = data.mode == "rules"
         settings = get_settings(session)
         env_key = os.getenv("LIFEOS_LLM_API_KEY", "").strip()
         env_model = os.getenv("LIFEOS_LLM_MODEL", "").strip()
@@ -116,7 +128,7 @@ class ReviewWeeklyReflectionSkill(Skill):
         llm_model = env_model or (settings.llm_model if settings else "")
         notice = ""
         debug_payload: Dict[str, Any] = {}
-        if llm_key:
+        if llm_key and not force_rules:
             llm_output, llm_error, debug_payload = _try_llm_generation(
                 llm_model, llm_key, weekly_context, lang
             )
@@ -125,7 +137,9 @@ class ReviewWeeklyReflectionSkill(Skill):
                 generator_mode = "llm"
             else:
                 generator_mode = "llm_fallback_rules"
-                notice = _llm_notice(llm_error, lang)
+                notice = _llm_notice(
+                    llm_error, lang, debug_payload.get("llm_error_summary", "")
+                )
 
         manual = data.trigger == "manual_regenerate"
         generator_mode = _decorate_generator_mode(generator_mode, manual)
@@ -338,12 +352,12 @@ def _pick_low_habit(
 
 def _extract_topics(logs: List[DayLog]) -> Tuple[List[str], Dict[str, int], Dict[str, int]]:
     topic_keywords = {
-        "health": ["??", "??", "??", "??", "??", "??"],
-        "product": ["??", "??", "??", "??", "??", "??", "??"],
-        "learning": ["??", "??", "??", "??", "??"],
-        "relationship": ["??", "??", "??", "??", "??"],
-        "emotion": ["??", "??", "??", "??", "??", "??", "??"],
-        "rest": ["??", "??", "??", "??", "??"],
+        "health": ["健康", "身体", "运动", "睡眠", "饮食", "锻炼"],
+        "product": ["项目", "进展", "开发", "迭代", "版本", "需求", "修复"],
+        "learning": ["学习", "阅读", "课程", "笔记", "练习"],
+        "relationship": ["关系", "朋友", "家人", "沟通", "陪伴"],
+        "emotion": ["情绪", "心情", "焦虑", "开心", "难过", "压力", "放松"],
+        "rest": ["休息", "恢复", "放空", "休假", "冥想"],
     }
     scores: Dict[str, int] = {key: 0 for key in topic_keywords}
     tag_counts: Dict[str, int] = {}
@@ -427,20 +441,19 @@ def _build_rules_payload(
 def _opener_for_counts(logged_days: int, missing_count: int, lang: str) -> str:
     if lang == "en":
         if logged_days >= 5:
-            return "? You kept a steady rhythm this week; your notes show real presence."
+            return "🌿 You kept a steady rhythm this week; your notes show real presence."
         if logged_days >= 3:
-            return "??? Nice consistency this week?let's keep it gentle and steady."
+            return "✨ Nice consistency this week; let's keep it gentle and steady."
         if logged_days >= 1:
-            return "?? Even a few notes matter. Thanks for showing up for yourself."
-        return "?? No entries this week is okay?whenever you're ready, we can start today."
+            return "🌤 Even a few notes matter. Thanks for showing up for yourself."
+        return "🌙 No entries this week is okay; whenever you're ready, we can start today."
     if logged_days >= 5:
-        return "? ?????????????????????"
+        return "🌿 本周节奏很稳，笔记里有真实的在场感。"
     if logged_days >= 3:
-        return "??? ??????????????????????"
+        return "✨ 这周挺稳定的，保持轻柔的节奏就很好。"
     if logged_days >= 1:
-        return "?? ?????????????????"
-    return "?? ???????????????????????"
-
+        return "🌤 有几条记录也很珍贵，谢谢你陪自己。"
+    return "🌙 这一周没有记录也没关系，准备好我们再从今天开始。"
 
 
 def _build_highlights(
@@ -454,35 +467,34 @@ def _build_highlights(
     if logged_days == 0:
         if lang == "en":
             return ["This week felt like a soft pause", "Giving yourself space is also care"]
-        return ["??????????", "?????????"]
+        return ["这周像是一个轻柔的暂停", "给自己留白也是一种照顾"]
 
     for topic in top_topic_labels[:3]:
         if lang == "en":
             highlights.append(f"In your notes, {topic} stood out this week.")
         else:
-            highlights.append(f"???????{topic}?????????")
+            highlights.append(f"这周的记录里，{topic}很突出。")
     if len(highlights) < 2:
         if lang == "en":
             highlights.append(f"You left notes on {logged_days} day(s), which is real evidence of care.")
         else:
-            highlights.append(f"????{logged_days}??????????????????")
+            highlights.append(f"你记录了 {logged_days} 天，这是实打实的投入。")
     if len(highlights) < 2:
         if lang == "en":
             highlights.append("Your week carries its own rhythm across small moments.")
         else:
-            highlights.append("???????????????")
+            highlights.append("你这一周在小事里也保持了节奏。")
 
     return highlights[:4]
-
 
 
 def _build_gaps(missing_dates: List[str], lang: str) -> Dict[str, Any]:
     if not missing_dates:
         return {
             "missing_dates": [],
-            "message": "Nice—your week looks complete."
+            "message": "Nice; your week looks complete."
             if lang == "en"
-            else "这周记录很完整，已经很不错了。",
+            else "很棒，这周的记录很完整。",
             "links": [],
         }
 
@@ -492,9 +504,9 @@ def _build_gaps(missing_dates: List[str], lang: str) -> Dict[str, Any]:
     ]
     return {
         "missing_dates": missing_dates,
-        "message": "A few days are blank—add a tiny note if you feel like it."
+        "message": "A few days are blank; add a tiny note if you feel like it."
         if lang == "en"
-        else "这周还有几天未记录，如果愿意可以补上一点点。",
+        else "有几天还空着，想的话补一两句也行。",
         "links": links,
     }
 
@@ -511,7 +523,7 @@ def _build_next_steps(weekly_context: Dict[str, Any], lang: str) -> List[str]:
         steps.append(
             "Pick one missing day and add 2-3 lines - no need to be complete."
             if lang == "en"
-            else "? 1 ??? 2-3 ???????????"
+            else "挑一天空白日补 2-3 句就好，不必完整。"
         )
 
     low_habit = _pick_low_habit(habits)
@@ -525,30 +537,29 @@ def _build_next_steps(weekly_context: Dict[str, Any], lang: str) -> List[str]:
                 f"Try a lighter version of {title} this week ({done}/{expected})."
             )
         else:
-            steps.append(f"? {title} ???????{done}/{expected}??")
+            steps.append(f"这周给 {title} 设个更轻的版本（{done}/{expected}）。")
 
     if not steps:
         if logged_days == 0:
             steps.append(
                 "Write one gentle line tonight: 'the thing I cared most about today.'"
                 if lang == "en"
-                else "???????'??????????'"
+                else "今晚写一句温柔的话：'今天我最在意的一件事。'"
             )
         elif daily_plan_rate and daily_plan_rate < 0.6:
             steps.append(
                 "Pick one easy plan item each day to keep the chain warm."
                 if lang == "en"
-                else "???????????????????????"
+                else "每天挑一个简单计划项，先把链条热起来。"
             )
         else:
             steps.append(
                 f"Keep the rhythm you already built across {logged_days} day(s)."
                 if lang == "en"
-                else f"????????? {logged_days} ??????????"
+                else f"把你已经建立的节奏延续下去（{logged_days} 天）。"
             )
 
     return steps[:2]
-
 
 
 def _try_llm_generation(
@@ -557,14 +568,37 @@ def _try_llm_generation(
     context_missing_dates = weekly_context.get("stats", {}).get("missing_dates", [])
     if lang == "en":
         prompt = (
-            "You are a kind weekly reflection assistant."
-            "Use weekly_context as the only source. Do not invent details."
-            "Output JSON only with fields: opener(1 sentence with emoji),"
-            "highlights(2-4 items), gaps(missing_dates/message/links),"
-            "next_steps(1-2 items), metrics(object)."
-            "Highlights must reference tags/topics in weekly_context."
-            "At least one next_step must be tied to real patterns in weekly_context"
-            " (missing_dates, habit completion, or plan completion)."
+            "You are a kind weekly reflection assistant.\n"
+            "weekly_context is the ONLY source of truth. Do not invent anything.\n"
+            "Output JSON ONLY (no markdown, no extra text). Must be valid for json.loads.\n"
+            "JSON fields must be exactly: opener (1 sentence with emoji), "
+            "highlights (array of strings), "
+            "gaps ({missing_dates:[str], message:str, links:[{date:str,url:str}]}), "
+            "next_steps (array of strings), metrics (object).\n"
+            "\n"
+            "Coverage requirements (must satisfy all):\n"
+            "A) Highlights must cover BOTH logs and habits/plans:\n"
+            "   - Provide 4 highlights.\n"
+            "   - At least 2 highlights summarize LOGS using tags/topics/keywords that appear in weekly_context.\n"
+            "   - At least 1 highlight summarizes HABITS (completion, streaks, or consistency) from weekly_context.\n"
+            "   - At least 1 highlight summarizes PLANS/OBJECTIVES (progress or completion) from weekly_context.\n"
+            "B) Gaps:\n"
+            "   - gaps.missing_dates must list missing log dates from weekly_context (if none, empty array).\n"
+            "   - gaps.message must mention BOTH (i) log coverage issues and (ii) habit/plan friction if evidenced.\n"
+            "   - gaps.links should include only links present in weekly_context; otherwise [].\n"
+            "C) Next steps:\n"
+            "   - Provide 2 next_steps.\n"
+            "   - One next_step must address missing_dates (specific action).\n"
+            "   - One next_step must be tied to a real pattern in habits or plan completion (specific action).\n"
+            "D) Metrics must include these keys (use numbers/strings as appropriate):\n"
+            "   log_days_recorded, log_days_missing, top_tags, "
+            "   habit_done, habit_total, habit_completion_rate, "
+            "   plan_done, plan_total, plan_completion_rate.\n"
+            "\n"
+            "Style:\n"
+            "- Encouraging, low-pressure, non-judgmental.\n"
+            "- Avoid diagnoses.\n"
+            "- Each output string should include at least one emoji.\n"
             f"weekly_context: {json.dumps(weekly_context, ensure_ascii=False)}"
         )
     else:
@@ -577,27 +611,62 @@ def _try_llm_generation(
             '   {"opener": str, "highlights": [str], '
             '    "gaps": {"missing_dates":[str], "message": str, "links":[{"date": str, "url": str}]}, '
             '    "next_steps": [str], "metrics": object}\n'
-            "4) highlights 必须引用 weekly_context 中出现过的主题/标签（topics/tags/关键词统计），不能泛泛而谈。\n"
-            "5) next_steps 至少 1 条必须与 weekly_context 的真实模式绑定（例如漏记 missing_dates、习惯完成率、计划完成情况）。\n"
-            "6) 语气要求：鼓励、低压、不评判；不要指责；不要做心理诊断。\n"
+            "   注意：键名必须保持英文，不允许翻译成中文。\n"
+            "\n"
+            "覆盖要求（必须全部满足）：\n"
+            "A) highlights 必须同时覆盖【日志 logs】与【习惯 habits / 计划 plans】：\n"
+            "   - 固定输出 4 条 highlights。\n"
+            "   - 至少 2 条必须总结日志（logs），且必须引用 weekly_context 中真实出现过的主题/标签/关键词（tags/topics/关键词统计）。\n"
+            "   - 至少 1 条必须总结习惯（habits）的完成情况/连续性/波动（必须有 weekly_context 证据）。\n"
+            "   - 至少 1 条必须总结计划或目标（plans/objectives）的完成/推进情况（必须有 weekly_context 证据）。\n"
+            "B) gaps：\n"
+            "   - gaps.missing_dates 仅从 weekly_context 读取漏记日期；没有则 []。\n"
+            "   - gaps.message 必须同时提到：①日志覆盖问题（例如漏记/分布不均）②习惯或计划的阻力点（如果 weekly_context 中有完成率或未完成证据）。\n"
+            "   - gaps.links 只能使用 weekly_context 中已有的链接；没有则 []。\n"
+            "C) next_steps：\n"
+            "   - 固定输出 2 条 next_steps。\n"
+            "   - 至少 1 条必须直接针对 missing_dates（给出具体可执行动作）。\n"
+            "   - 另 1 条必须绑定 weekly_context 的真实模式（习惯完成率/计划完成情况/明显波动之一），给出具体可执行动作。\n"
+            "D) metrics 必须包含以下键（值可为数字/字符串/数组，但要可 JSON 化）：\n"
+            "   log_days_recorded, log_days_missing, top_tags, "
+            "   habit_done, habit_total, habit_completion_rate, "
+            "   plan_done, plan_total, plan_completion_rate。\n"
+            "\n"
+            "语气与格式：\n"
+            "- 鼓励、低压、不评判；不要指责；不要做心理诊断。\n"
+            "- opener 必须 1 句话并带 emoji。\n"
+            "- highlights/next_steps 的每一条字符串都至少包含 1 个 emoji。\n"
             f"weekly_context: {json.dumps(weekly_context, ensure_ascii=False)}"
         )
 
     try:
-        content, finish_reason, used_response_format = _call_llm(
+        content, finish_reason, used_response_format, response_meta = _call_llm(
             model_key, api_key, prompt, lang
         )
-    except Exception as exc:
-        return None, "llm_error", {"llm_error": f"{exc}", "llm_stream": False}
+    except LlmCallError as exc:
+        debug = _build_llm_error_payload(exc.details)
+        _log_llm_failure(debug)
+        return None, "llm_error", debug
     if not content:
-        return None, "llm_empty", {"llm_stream": False}
+        debug = _build_llm_error_payload(_make_empty_response_details(model_key))
+        _log_llm_failure(debug)
+        return None, "llm_empty", debug
     debug = {
         "llm_finish_reason": finish_reason,
         "llm_stream": False,
         "llm_response_format": used_response_format,
     }
+    if response_meta:
+        debug.update(response_meta)
     if finish_reason == "length":
         debug["llm_raw_text"] = _truncate_text(content)
+        debug.update(
+            _build_llm_error_payload(
+                _make_output_error_details(
+                    model_key, "TruncatedResponse", "finish_reason=length"
+                )
+            )
+        )
         return None, "llm_truncated", debug
     raw_text = content
     cleaned = _clean_llm_text(raw_text)
@@ -606,7 +675,19 @@ def _try_llm_generation(
     except json.JSONDecodeError as exc:
         debug["llm_raw_text"] = _truncate_text(raw_text)
         debug["llm_parse_error"] = f"{exc}"
-        return None, "llm_invalid_json", debug
+        repair_result, repair_debug = _repair_llm_json(
+            model_key, api_key, weekly_context, lang
+        )
+        debug.update(repair_debug)
+        if repair_result is None:
+            debug.update(
+                _build_llm_error_payload(
+                    _make_parse_error_details(model_key, raw_text, exc)
+                )
+            )
+            _log_llm_failure(debug)
+            return None, "llm_invalid_json", debug
+        parsed = repair_result
 
     opener = (parsed.get("opener") or "").strip()
     highlights = [str(item).strip() for item in parsed.get("highlights", []) if str(item).strip()]
@@ -615,7 +696,32 @@ def _try_llm_generation(
 
     if not opener or len(highlights) < 2 or len(next_steps) < 1:
         debug["llm_raw_text"] = _truncate_text(raw_text)
-        return None, "llm_missing_fields", debug
+        repair_result, repair_debug = _repair_llm_json(
+            model_key, api_key, weekly_context, lang
+        )
+        debug.update(repair_debug)
+        if repair_result is not None:
+            opener = (repair_result.get("opener") or "").strip()
+            highlights = [
+                str(item).strip()
+                for item in repair_result.get("highlights", [])
+                if str(item).strip()
+            ]
+            gaps = repair_result.get("gaps", {})
+            next_steps = [
+                str(item).strip()
+                for item in repair_result.get("next_steps", [])
+                if str(item).strip()
+            ]
+        if not opener or len(highlights) < 2 or len(next_steps) < 1:
+            debug.update(
+                _build_llm_error_payload(
+                    _make_output_error_details(
+                        model_key, "MissingFields", "missing required fields"
+                    )
+                )
+            )
+            return None, "llm_missing_fields", debug
 
     normalized_gaps = _normalize_gaps(gaps)
     context_gaps = _build_gaps(context_missing_dates, lang)
@@ -632,8 +738,6 @@ def _try_llm_generation(
         "metrics": {},
     }, "", debug
 
-
-
 def _decorate_generator_mode(generator_mode: str, manual: bool) -> str:
     if not manual:
         return generator_mode
@@ -642,22 +746,6 @@ def _decorate_generator_mode(generator_mode: str, manual: bool) -> str:
     if generator_mode == "llm_fallback_rules":
         return "llm_failed_fallback_rules_manual_regenerate"
     return "rules_manual_regenerate"
-
-
-def _llm_notice(error_code: str, lang: str) -> str:
-    if not error_code:
-        return ""
-    if lang == "en":
-        if error_code == "llm_invalid_json":
-            return "LLM returned non-JSON output; fell back to rules."
-        if error_code == "llm_truncated":
-            return "LLM response was truncated; fell back to rules."
-        return "LLM failed; fell back to rules."
-    if error_code == "llm_invalid_json":
-        return "LLM 输出非 JSON，已回退规则生成"
-    if error_code == "llm_truncated":
-        return "LLM 响应被截断，已回退规则生成"
-    return "LLM 调用失败，已回退规则生成"
 
 
 def _topic_labels(lang: str) -> Dict[str, str]:
@@ -676,19 +764,18 @@ def _topic_labels(lang: str) -> Dict[str, str]:
             "reflection": "reflection",
         }
     return {
-        "health": "?????",
-        "product": "?????",
-        "learning": "?????",
-        "relationship": "?????",
-        "emotion": "?????",
-        "rest": "?????",
-        "morning": "????",
-        "afternoon": "????",
-        "evening": "????",
-        "rhythm": "????",
-        "reflection": "????",
+        "health": "健康与身体",
+        "product": "项目与进展",
+        "learning": "学习与成长",
+        "relationship": "关系",
+        "emotion": "情绪",
+        "rest": "休息与恢复",
+        "morning": "晨间记录",
+        "afternoon": "午间记录",
+        "evening": "晚间记录",
+        "rhythm": "每日节奏",
+        "reflection": "复盘",
     }
-
 
 
 def _normalize_gaps(gaps: Dict[str, Any]) -> Dict[str, Any]:
@@ -699,44 +786,6 @@ def _normalize_gaps(gaps: Dict[str, Any]) -> Dict[str, Any]:
         "message": str(gaps.get("message") or "").strip(),
         "links": links,
     }
-
-
-def _call_llm(model_key: str, api_key: str, prompt: str, lang: str) -> Tuple[str, str, bool]:
-    if OpenAI is None:
-        return "", "", False
-    client = OpenAI(api_key=api_key, base_url="https://api-inference.modelscope.cn/v1/")
-    model_id = model_key or "Qwen/Qwen2.5-Coder-32B-Instruct"
-    messages = [
-        {
-            "role": "system",
-            "content": "You are a gentle weekly reflection assistant."
-            if lang == "en"
-            else "你是温柔的周度回顾助手。",
-        },
-        {"role": "user", "content": prompt},
-    ]
-    try:
-        resp = client.chat.completions.create(
-            model=model_id,
-            messages=messages,
-            stream=False,
-            temperature=0,
-            response_format={"type": "json_object"},
-        )
-        used_response_format = True
-    except Exception:
-        resp = client.chat.completions.create(
-            model=model_id,
-            messages=messages,
-            stream=False,
-            temperature=0,
-        )
-        used_response_format = False
-    if not resp.choices:
-        return "", "", used_response_format
-    message = resp.choices[0].message
-    finish_reason = resp.choices[0].finish_reason or ""
-    return (message.content or "").strip(), finish_reason, used_response_format
 
 
 def _clean_llm_text(text: str) -> str:
@@ -791,6 +840,271 @@ def _truncate_text(text: str, limit: int = 2000) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 3] + "..."
+
+
+def _format_llm_notice(base: str, summary: str, lang: str) -> str:
+    suffix = ""
+    if summary:
+        suffix = f" ({summary})" if lang == "en" else f"（{summary}）"
+    if lang == "en":
+        return f"{base}{suffix}; fell back to rules."
+    return f"{base}{suffix}，已回退规则生成。"
+
+def _llm_notice(error_code: str, lang: str, error_summary: str = "") -> str:
+    if not error_code:
+        return ""
+    summary = (error_summary or "").strip()
+    if lang == "en":
+        if error_code == "llm_invalid_json":
+            return _format_llm_notice("LLM returned non-JSON output", summary, lang)
+        if error_code == "llm_truncated":
+            return _format_llm_notice("LLM response was truncated", summary, lang)
+        return _format_llm_notice("LLM failed", summary, lang)
+    if error_code == "llm_invalid_json":
+        return _format_llm_notice("LLM 输出非 JSON", summary, lang)
+    if error_code == "llm_truncated":
+        return _format_llm_notice("LLM 响应被截断", summary, lang)
+    return _format_llm_notice("LLM 调用失败", summary, lang)
+
+
+def _build_llm_error_payload(details: Dict[str, Any]) -> Dict[str, Any]:
+    summary = _summarize_llm_error(details)
+    payload = {**details}
+    if summary:
+        payload["llm_error_summary"] = summary
+    if "llm_stream" not in payload:
+        payload["llm_stream"] = False
+    return payload
+
+
+def _summarize_llm_error(details: Dict[str, Any]) -> str:
+    status = details.get("http_status")
+    error_type = details.get("error_type") or "LLMError"
+    message = details.get("error_message") or ""
+    message = _truncate_text(message.replace("\n", " ").strip(), 200)
+    if status:
+        return f"{status} {message}".strip()
+    if message:
+        return f"{error_type}: {message}".strip()
+    return error_type
+
+
+def _log_llm_failure(details: Dict[str, Any]) -> None:
+    try:
+        logger.error("LLM call failed: %s", json.dumps(details, ensure_ascii=True))
+    except Exception:  # noqa: BLE001
+        logger.error("LLM call failed (unserializable details)")
+
+
+def _extract_response_meta(resp: Any, model_id: str) -> Dict[str, Any]:
+    request_id = ""
+    for attr in ("request_id", "_request_id"):
+        value = getattr(resp, attr, None)
+        if value:
+            request_id = str(value)
+            break
+    return {
+        "provider": LLM_PROVIDER,
+        "model_id": model_id,
+        "base_url": LLM_BASE_URL,
+        "request_id": request_id,
+    }
+
+
+def _coerce_response_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="ignore")
+    if isinstance(value, dict):
+        try:
+            return json.dumps(value, ensure_ascii=True)
+        except Exception:  # noqa: BLE001
+            return str(value)
+    return str(value)
+
+
+def _make_llm_error_details(
+    model_id: str, exc: Exception, stream: bool, enable_thinking: bool
+) -> Dict[str, Any]:
+    status = getattr(exc, "status_code", None)
+    request_id = getattr(exc, "request_id", None)
+    response = getattr(exc, "response", None)
+    response_text = ""
+    if response is not None:
+        status = status or getattr(response, "status_code", None)
+        headers = getattr(response, "headers", None) or {}
+        request_id = request_id or headers.get("x-request-id") or headers.get("X-Request-Id")
+        response_text = _coerce_response_text(
+            getattr(response, "text", None) or getattr(response, "content", None)
+        )
+    body = getattr(exc, "body", None)
+    if body and not response_text:
+        response_text = _coerce_response_text(body)
+    error_message = str(exc)
+    if response_text:
+        error_message = f"{error_message} | response: {_truncate_text(response_text, 800)}"
+    return {
+        "provider": LLM_PROVIDER,
+        "model_id": model_id,
+        "base_url": LLM_BASE_URL,
+        "http_status": status,
+        "error_type": type(exc).__name__,
+        "error_message": _truncate_text(error_message, 800),
+        "request_id": str(request_id or ""),
+        "llm_stream": stream,
+        "llm_enable_thinking": enable_thinking,
+    }
+
+
+def _make_parse_error_details(
+    model_id: str, raw_text: str, exc: json.JSONDecodeError
+) -> Dict[str, Any]:
+    model_id = model_id or "Qwen/Qwen2.5-Coder-32B-Instruct"
+    return {
+        "provider": LLM_PROVIDER,
+        "model_id": model_id,
+        "base_url": LLM_BASE_URL,
+        "http_status": None,
+        "error_type": type(exc).__name__,
+        "error_message": _truncate_text(f"{exc} | response: {raw_text}", 800),
+        "request_id": "",
+    }
+
+
+def _make_empty_response_details(model_id: str) -> Dict[str, Any]:
+    model_id = model_id or "Qwen/Qwen2.5-Coder-32B-Instruct"
+    return {
+        "provider": LLM_PROVIDER,
+        "model_id": model_id,
+        "base_url": LLM_BASE_URL,
+        "http_status": None,
+        "error_type": "EmptyResponse",
+        "error_message": "Empty response content.",
+        "request_id": "",
+    }
+
+
+def _make_output_error_details(
+    model_id: str, error_type: str, message: str
+) -> Dict[str, Any]:
+    model_id = model_id or "Qwen/Qwen2.5-Coder-32B-Instruct"
+    return {
+        "provider": LLM_PROVIDER,
+        "model_id": model_id,
+        "base_url": LLM_BASE_URL,
+        "http_status": None,
+        "error_type": error_type,
+        "error_message": _truncate_text(message, 800),
+        "request_id": "",
+    }
+
+
+def _call_llm(
+    model_key: str, api_key: str, prompt: str, lang: str, stream: bool = False
+) -> Tuple[str, str, bool, Dict[str, Any]]:
+    if OpenAI is None:
+        return "", "", False, {}
+    client = OpenAI(api_key=api_key, base_url=LLM_BASE_URL)
+    model_id = model_key or "Qwen/Qwen2.5-Coder-32B-Instruct"
+    messages = [
+        {
+            "role": "system",
+            "content": "You are a gentle weekly reflection assistant."
+            if lang == "en"
+            else "你是一位温柔的周度复盘助手。",
+        },
+        {"role": "user", "content": prompt},
+    ]
+    extra_body = {"enable_thinking": True}
+    if not stream:
+        extra_body["enable_thinking"] = False
+    enable_thinking = bool(extra_body.get("enable_thinking", False))
+
+    request_kwargs = {
+        "model": model_id,
+        "messages": messages,
+        "stream": stream,
+        "temperature": 0,
+    }
+    if extra_body:
+        request_kwargs["extra_body"] = extra_body
+    try:
+        resp = client.chat.completions.create(
+            **request_kwargs,
+            response_format={"type": "json_object"},
+        )
+        used_response_format = True
+    except Exception as exc:
+        try:
+            resp = client.chat.completions.create(**request_kwargs)
+            used_response_format = False
+        except Exception as exc_fallback:
+            raise LlmCallError(
+                _make_llm_error_details(model_id, exc_fallback, stream, enable_thinking)
+            ) from exc_fallback
+    if not resp.choices:
+        return "", "", used_response_format, {}
+    message = resp.choices[0].message
+    finish_reason = resp.choices[0].finish_reason or ""
+    reasoning_content = getattr(message, "reasoning_content", "") or ""
+    response_meta = _extract_response_meta(resp, model_id)
+    response_meta["llm_stream"] = stream
+    response_meta["llm_enable_thinking"] = enable_thinking
+    if reasoning_content:
+        response_meta["llm_reasoning_content_present"] = True
+    return (message.content or "").strip(), finish_reason, used_response_format, response_meta
+
+
+def _build_repair_prompt(weekly_context: Dict[str, Any], lang: str) -> str:
+    schema = (
+        '{"opener": str, "highlights": [str], '
+        '"gaps": {"missing_dates":[str], "message": str, "links":[{"date": str, "url": str}]}, '
+        '"next_steps": [str], "metrics": object}'
+    )
+    if lang == "en":
+        return (
+            "Return ONLY valid JSON for the following schema. "
+            "No markdown, no explanations. "
+            f"Schema: {schema}. "
+            f"weekly_context: {json.dumps(weekly_context, ensure_ascii=False)}"
+        )
+    return (
+        "请只返回符合 schema 的纯 JSON。禁止 Markdown、禁止解释文字。"
+        "键名必须保持英文，不允许翻译成中文。"
+        f"Schema: {schema}. "
+        f"weekly_context: {json.dumps(weekly_context, ensure_ascii=False)}"
+    )
+
+def _repair_llm_json(
+    model_key: str, api_key: str, weekly_context: Dict[str, Any], lang: str
+) -> tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
+    prompt = _build_repair_prompt(weekly_context, lang)
+    debug: Dict[str, Any] = {"llm_repair_attempted": True}
+    try:
+        content, finish_reason, used_response_format, response_meta = _call_llm(
+            model_key, api_key, prompt, lang
+        )
+    except LlmCallError as exc:
+        debug["llm_repair_failed"] = True
+        debug.update(_build_llm_error_payload(exc.details))
+        _log_llm_failure(debug)
+        return None, debug
+    debug.update(
+        {
+            "llm_repair_finish_reason": finish_reason,
+            "llm_repair_response_format": used_response_format,
+        }
+    )
+    if response_meta:
+        debug.update(response_meta)
+    cleaned = _clean_llm_text(content or "")
+    try:
+        return json.loads(cleaned), debug
+    except json.JSONDecodeError as exc:
+        debug["llm_repair_parse_error"] = f"{exc}"
+        debug["llm_repair_raw_text"] = _truncate_text(content or "")
+        return None, debug
 
 
 def get_skill() -> Skill:

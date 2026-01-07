@@ -1,4 +1,4 @@
-<div class="bg-white p-5 rounded shadow-sm border border-slate-200">
+<div id="weekly-reflection-card" class="bg-white p-5 rounded shadow-sm border border-slate-200">
   <div class="flex items-center justify-between">
     <div class="text-base font-semibold" data-i18n="dashboard.weekly_reflection.title"></div>
     {% if weekly_reflection.metrics.window_end %}
@@ -14,7 +14,7 @@
     <div class="text-xs text-slate-500" data-i18n="dashboard.weekly_reflection.highlights"></div>
     <ul class="mt-2 space-y-1 text-slate-700">
       {% for item in weekly_reflection.highlights %}
-        <li>• {{ item }}</li>
+        <li>- {{ item }}</li>
       {% endfor %}
     </ul>
   </div>
@@ -37,35 +37,64 @@
     <div class="text-xs text-slate-500" data-i18n="dashboard.weekly_reflection.next_steps"></div>
     <ul class="mt-2 space-y-1 text-slate-700">
       {% for item in weekly_reflection.next_steps %}
-        <li>• {{ item }}</li>
+        <li>- {{ item }}</li>
       {% endfor %}
     </ul>
   </div>
 
-  <div class="mt-4 flex flex-wrap gap-2">
-    <form hx-post="/weekly-reflection/decide" hx-target="#weekly-reflection-card">
+  <div class="mt-4 flex flex-wrap items-center gap-2">
+    <form
+      hx-post="/weekly-reflection/decide"
+      hx-target="#weekly-reflection-card"
+      hx-swap="outerHTML"
+      hx-indicator="#weekly-reflection-loading"
+    >
       <input type="hidden" name="suggestion_id" value="{{ weekly_reflection.id }}" />
       <input type="hidden" name="decision" value="like" />
-      <button class="px-2 py-1 text-xs border rounded" data-i18n="dashboard.weekly_reflection.like"></button>
-    </form>
-    <form hx-post="/weekly-reflection/decide" hx-target="#weekly-reflection-card">
-      <input type="hidden" name="suggestion_id" value="{{ weekly_reflection.id }}" />
-      <input type="hidden" name="decision" value="dislike" />
-      <button class="px-2 py-1 text-xs border rounded" data-i18n="dashboard.weekly_reflection.dislike"></button>
-    </form>
-    <form hx-post="/weekly-reflection/decide" hx-target="#weekly-reflection-card">
-      <input type="hidden" name="suggestion_id" value="{{ weekly_reflection.id }}" />
-      <input type="hidden" name="decision" value="snooze_week" />
-      <button class="px-2 py-1 text-xs border rounded" data-i18n="dashboard.weekly_reflection.snooze_week"></button>
+      <button type="submit" class="px-2 py-1 text-xs border rounded" data-i18n="dashboard.weekly_reflection.like"></button>
     </form>
     <form
-      hx-post="/suggestions/weekly_reflection/regenerate"
+      hx-post="/weekly-reflection/decide"
       hx-target="#weekly-reflection-card"
-      hx-indicator="#hx-indicator"
+      hx-swap="outerHTML"
+      hx-indicator="#weekly-reflection-loading"
+    >
+      <input type="hidden" name="suggestion_id" value="{{ weekly_reflection.id }}" />
+      <input type="hidden" name="decision" value="dislike" />
+      <button type="submit" class="px-2 py-1 text-xs border rounded" data-i18n="dashboard.weekly_reflection.dislike"></button>
+    </form>
+    <form
+      hx-post="/weekly-reflection/decide"
+      hx-target="#weekly-reflection-card"
+      hx-swap="outerHTML"
+      hx-indicator="#weekly-reflection-loading"
+    >
+      <input type="hidden" name="suggestion_id" value="{{ weekly_reflection.id }}" />
+      <input type="hidden" name="decision" value="snooze_week" />
+      <button type="submit" class="px-2 py-1 text-xs border rounded" data-i18n="dashboard.weekly_reflection.snooze_week"></button>
+    </form>
+    <form
+      hx-post="/suggestions/weekly_reflection/regenerate?mode=llm"
+      hx-target="#weekly-reflection-card"
+      hx-swap="outerHTML"
+      hx-indicator="#weekly-reflection-loading"
     >
       <input type="hidden" name="target_date" value="{{ weekly_reflection.metrics.window_end }}" />
       <input type="hidden" name="window_days" value="7" />
-      <button class="px-2 py-1 text-xs border rounded" data-i18n="dashboard.weekly_reflection.regenerate"></button>
+      <button type="submit" class="px-2 py-1 text-xs border rounded" data-i18n="dashboard.weekly_reflection.regenerate"></button>
     </form>
+{#    <form#}
+{#      hx-post="/suggestions/weekly_reflection/regenerate?mode=rules"#}
+{#      hx-target="#weekly-reflection-card"#}
+{#      hx-swap="outerHTML"#}
+{#      hx-indicator="#weekly-reflection-loading"#}
+{#    >#}
+{#      <input type="hidden" name="target_date" value="{{ weekly_reflection.metrics.window_end }}" />#}
+{#      <input type="hidden" name="window_days" value="7" />#}
+{#      <button type="submit" class="px-2 py-1 text-xs border rounded" data-i18n="dashboard.weekly_reflection.regenerate_rules"></button>#}
+{#    </form>#}
+    <div id="weekly-reflection-loading" class="htmx-indicator px-2 py-1 text-xs text-slate-500">
+      <span data-i18n="common.loading"></span>
+    </div>
   </div>
 </div>

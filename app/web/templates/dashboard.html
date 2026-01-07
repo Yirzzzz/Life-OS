@@ -239,12 +239,10 @@
       </div>
     </div>
 
-    <div id="weekly-reflection-card">
-      {% if weekly_reflection and not weekly_reflection_snoozed %}
-        {% include "partials/weekly_reflection.html" %}
-      {% elif weekly_reflection_snoozed %}
-        {% include "partials/weekly_reflection_empty.html" %}
-      {% endif %}
-    </div>
+    {% if weekly_reflection and not weekly_reflection_snoozed %}
+      {% include "partials/weekly_reflection.html" %}
+    {% elif weekly_reflection_snoozed %}
+      {% include "partials/weekly_reflection_empty.html" %}
+    {% endif %}
   </div>
 {% endblock %}

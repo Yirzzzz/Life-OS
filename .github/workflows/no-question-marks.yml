@@ -1,0 +1,30 @@
+name: No Question Marks Placeholder
+
+on:
+  push:
+    paths:
+      - "**/*.py"
+      - "**/*.html"
+      - "**/*.js"
+      - "**/*.ts"
+      - "**/*.md"
+  pull_request:
+    paths:
+      - "**/*.py"
+      - "**/*.html"
+      - "**/*.js"
+      - "**/*.ts"
+      - "**/*.md"
+
+jobs:
+  detect-placeholders:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail on ??? placeholders
+        shell: bash
+        run: |
+          if rg -n "\?\?\?" .; then
+            echo "Found placeholder question marks (???)."
+            exit 1
+          fi
