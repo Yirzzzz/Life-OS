@@ -6,3 +6,7 @@
 # Explicit database file names
 app.db
 lifeos.db
+
+
+__pycache__/
+*.pyc
