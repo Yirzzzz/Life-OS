@@ -11,7 +11,7 @@ from sqlmodel import Session, select
 
 from app.agent.base import Skill
 from app.data.repo import get_settings
-from app.domain.models import DayLog, Suggestion
+from app.domain.models import DayLog, DailyPlan, HabitTemplate, PlanItem, Suggestion
 
 
 class WeeklyReflectionInput(BaseModel):
@@ -38,6 +38,7 @@ class ReviewWeeklyReflectionSkill(Skill):
 
     def run(self, data: WeeklyReflectionInput, context: dict) -> WeeklyReflectionOutput:
         session: Session = context["session"]
+        self.log_input = None
         window_days = max(1, data.window_days)
         lang = data.lang if data.lang in {"zh", "en"} else "zh"
         window_start = data.as_of - timedelta(days=window_days - 1)
@@ -48,25 +49,61 @@ class ReviewWeeklyReflectionSkill(Skill):
         ).all()
         log_by_date = {log.date: log for log in logs}
 
+        window_dates = [window_start + timedelta(days=offset) for offset in range(window_days)]
         missing_dates = [
-            (window_start + timedelta(days=offset)).isoformat()
-            for offset in range(window_days)
-            if not _log_has_content(log_by_date.get(window_start + timedelta(days=offset)))
+            target_date.isoformat()
+            for target_date in window_dates
+            if not _log_has_content(log_by_date.get(target_date))
         ]
         logged_days = window_days - len(missing_dates)
 
-        top_topics, topic_scores = _extract_topics(logs)
-        topic_labels = _topic_labels(lang)
-        top_topic_labels = [topic_labels.get(key, key) for key in top_topics]
-        rule_payload = _build_rules_payload(
-            logs=logs,
+        plans = session.exec(
+            select(DailyPlan).where(
+                DailyPlan.date >= window_start, DailyPlan.date <= window_end
+            )
+        ).all()
+        plan_ids = [plan.id for plan in plans]
+        items = (
+            session.exec(select(PlanItem).where(PlanItem.daily_plan_id.in_(plan_ids))).all()
+            if plan_ids
+            else []
+        )
+        completed_items = [item for item in items if item.completed_at]
+        daily_plan_rate = len(completed_items) / len(items) if items else 0.0
+        weekly_plan_done = len(completed_items)
+
+        habits_context = _build_habits_context(
+            session=session,
+            items=items,
             window_start=window_start,
             window_end=window_end,
-            logged_days=logged_days,
-            missing_dates=missing_dates,
+        )
+        logs_context = _build_logs_context(window_dates, log_by_date)
+        top_topics, topic_scores, tag_counts = _extract_topics(logs)
+        topic_labels = _topic_labels(lang)
+        top_topic_labels = [_label_topic(topic, topic_labels) for topic in top_topics]
+        weekly_context = {
+            "lang": lang,
+            "window": {
+                "start": window_start.isoformat(),
+                "end": window_end.isoformat(),
+            },
+            "logs": logs_context,
+            "habits": habits_context,
+            "stats": {
+                "logged_days": logged_days,
+                "missing_dates": missing_dates,
+                "daily_plan_rate": daily_plan_rate,
+                "weekly_plan_done": weekly_plan_done,
+            },
+        }
+        self.log_input = _weekly_context_summary(weekly_context, top_topic_labels)
+        rule_payload = _build_rules_payload(
+            weekly_context=weekly_context,
             top_topics=top_topics,
             top_topic_labels=top_topic_labels,
             topic_scores=topic_scores,
+            tag_counts=tag_counts,
             lang=lang,
         )
 
@@ -81,7 +118,7 @@ class ReviewWeeklyReflectionSkill(Skill):
         debug_payload: Dict[str, Any] = {}
         if llm_key:
             llm_output, llm_error, debug_payload = _try_llm_generation(
-                llm_model, llm_key, rule_payload, lang
+                llm_model, llm_key, weekly_context, lang
             )
             if llm_output:
                 output = llm_output
@@ -92,14 +129,23 @@ class ReviewWeeklyReflectionSkill(Skill):
 
         manual = data.trigger == "manual_regenerate"
         generator_mode = _decorate_generator_mode(generator_mode, manual)
+        used_data = {
+            "logs_days": logged_days,
+            "habits_count": len(habits_context),
+            "topics": top_topic_labels,
+            "missing_count": len(missing_dates),
+        }
         metrics = {
             "logged_days": logged_days,
             "missing_dates": missing_dates,
             "top_topics": top_topic_labels,
             "window_start": window_start.isoformat(),
             "window_end": window_end.isoformat(),
+            "daily_plan_rate": daily_plan_rate,
+            "weekly_plan_done": weekly_plan_done,
             "generator_mode": generator_mode,
             "lang": lang,
+            "used_data": used_data,
         }
         if debug_payload:
             metrics.update(debug_payload)
@@ -151,109 +197,283 @@ def _log_has_content(log: Optional[DayLog]) -> bool:
     return False
 
 
-def _extract_topics(logs: List[DayLog]) -> Tuple[List[str], Dict[str, int]]:
+def _normalize_text(text: str) -> str:
+    return " ".join((text or "").replace("\r", " ").replace("\n", " ").split())
+
+
+def _excerpt_text(text: str, limit: int = 200) -> str:
+    cleaned = _normalize_text(text)
+    if len(cleaned) <= limit:
+        return cleaned
+    return cleaned[:limit]
+
+
+def _summarize_period_entries(entries: List[Dict[str, Any]]) -> Dict[str, str]:
+    buckets = {"morning": [], "afternoon": [], "evening": []}
+    for entry in entries or []:
+        period = entry.get("period")
+        if period not in buckets:
+            continue
+        text = _normalize_text(entry.get("text", ""))
+        if text:
+            buckets[period].append(text)
+    return {key: _excerpt_text(" / ".join(texts), 200) for key, texts in buckets.items()}
+
+
+def _collect_tags(log: Optional[DayLog]) -> List[str]:
+    if not log:
+        return []
+    tags: List[str] = []
+    tags.extend(log.tags or [])
+    for entry in log.period_entries or []:
+        tags.extend(entry.get("tags", []) or [])
+    cleaned: List[str] = []
+    for tag in tags:
+        tag_text = str(tag).strip()
+        if tag_text and tag_text not in cleaned:
+            cleaned.append(tag_text)
+    return cleaned
+
+
+def _build_logs_context(
+    window_dates: List[date], log_by_date: Dict[date, DayLog]
+) -> List[Dict[str, Any]]:
+    logs_context: List[Dict[str, Any]] = []
+    for target_date in window_dates:
+        log = log_by_date.get(target_date)
+        entries = log.period_entries if log else []
+        logs_context.append(
+            {
+                "date": target_date.isoformat(),
+                "has_content": _log_has_content(log),
+                "tags": _collect_tags(log),
+                "period_summaries": _summarize_period_entries(entries),
+                "journal_excerpt": _excerpt_text(log.journal_md if log else "", 200),
+            }
+        )
+    return logs_context
+
+
+def _build_habits_context(
+    session: Session, items: List[PlanItem], window_start: date, window_end: date
+) -> List[Dict[str, Any]]:
+    habit_ids = {item.linked_habit_id for item in items if item.linked_habit_id}
+    if not habit_ids:
+        return []
+    habits = session.exec(select(HabitTemplate).where(HabitTemplate.id.in_(habit_ids))).all()
+    done_counts: Dict[int, int] = {}
+    for item in items:
+        if not item.linked_habit_id or not item.completed_at:
+            continue
+        done_date = item.completed_at.date()
+        if done_date < window_start or done_date > window_end:
+            continue
+        done_counts[item.linked_habit_id] = done_counts.get(item.linked_habit_id, 0) + 1
+
+    habits_context: List[Dict[str, Any]] = []
+    for habit in habits:
+        eligible_start = max(window_start, habit.start_date)
+        eligible_days = (
+            (window_end - eligible_start).days + 1 if eligible_start <= window_end else 0
+        )
+        target_per_week = max(int(habit.target_per_week or 0), 0)
+        if habit.frequency == "weekly":
+            expected = min(target_per_week, eligible_days) if target_per_week else 0
+            completion_type = "weekly"
+        else:
+            expected = eligible_days
+            completion_type = "daily"
+        done_count = done_counts.get(habit.id or 0, 0)
+        rate = done_count / expected if expected else 0.0
+        habits_context.append(
+            {
+                "habit_id": habit.id,
+                "title": habit.title,
+                "frequency": habit.frequency,
+                "target_per_week": habit.target_per_week,
+                "start_date": habit.start_date.isoformat(),
+                "completion": {
+                    "type": completion_type,
+                    "done_count": done_count,
+                    "expected": expected,
+                    "rate": min(rate, 1.0),
+                },
+            }
+        )
+    return habits_context
+
+
+def _weekly_context_summary(weekly_context: Dict[str, Any], topics: List[str]) -> Dict[str, Any]:
+    stats = weekly_context.get("stats", {})
+    return {
+        "window": weekly_context.get("window", {}),
+        "logged_days": stats.get("logged_days", 0),
+        "missing_dates": stats.get("missing_dates", []),
+        "habits_count": len(weekly_context.get("habits", [])),
+        "topics": topics,
+    }
+
+
+def _label_topic(topic: str, topic_labels: Dict[str, str]) -> str:
+    return topic_labels.get(topic, topic)
+
+
+def _pick_low_habit(
+    habits: List[Dict[str, Any]], threshold: float = 0.6
+) -> Optional[Dict[str, Any]]:
+    candidates = [
+        habit
+        for habit in habits
+        if habit.get("completion", {}).get("expected", 0) > 0
+    ]
+    if not candidates:
+        return None
+    candidates.sort(
+        key=lambda habit: habit.get("completion", {}).get("rate", 0.0)
+    )
+    if candidates[0].get("completion", {}).get("rate", 0.0) >= threshold:
+        return None
+    return candidates[0]
+
+
+def _extract_topics(logs: List[DayLog]) -> Tuple[List[str], Dict[str, int], Dict[str, int]]:
     topic_keywords = {
-        "health": ["运动", "锻炼", "晨跑", "睡眠", "休息", "健康"],
-        "product": ["产品", "迭代", "上线", "开发", "接口", "优化", "项目"],
-        "learning": ["学习", "阅读", "课程", "写作", "复盘"],
-        "relationship": ["家人", "朋友", "陪伴", "沟通", "关系"],
-        "emotion": ["情绪", "焦虑", "开心", "压力", "平静", "难过", "放松"],
-        "rest": ["休闲", "娱乐", "散步", "音乐", "电影"],
+        "health": ["??", "??", "??", "??", "??", "??"],
+        "product": ["??", "??", "??", "??", "??", "??", "??"],
+        "learning": ["??", "??", "??", "??", "??"],
+        "relationship": ["??", "??", "??", "??", "??"],
+        "emotion": ["??", "??", "??", "??", "??", "??", "??"],
+        "rest": ["??", "??", "??", "??", "??"],
     }
     scores: Dict[str, int] = {key: 0 for key in topic_keywords}
+    tag_counts: Dict[str, int] = {}
+    period_counts: Dict[str, int] = {"morning": 0, "afternoon": 0, "evening": 0}
+    text_chunks: List[str] = []
     for log in logs:
-        for tag in log.tags or []:
-            if tag in scores:
-                scores[tag] += 3
+        for tag in _collect_tags(log):
+            tag_counts[tag] = tag_counts.get(tag, 0) + 1
         for entry in log.period_entries or []:
-            for tag in entry.get("tags", []) or []:
-                if tag in scores:
-                    scores[tag] += 3
-        text = " ".join(
-            [entry.get("text", "") for entry in (log.period_entries or [])] + [log.journal_md]
-        ).lower()
-        for topic, keywords in topic_keywords.items():
-            for kw in keywords:
-                if kw.lower() in text:
-                    scores[topic] += 1
+            text = entry.get("text", "")
+            if text:
+                text_chunks.append(text)
+            period = entry.get("period")
+            if period in period_counts and _normalize_text(text):
+                period_counts[period] += 1
+        if log.journal_md:
+            text_chunks.append(log.journal_md)
+    text = _normalize_text(" ".join(text_chunks)).lower()
+    for topic, keywords in topic_keywords.items():
+        for kw in keywords:
+            if kw.lower() in text:
+                scores[topic] += 1
 
-    ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
-    top_topics = [k for k, score in ranked if score > 0][:4]
-    if not top_topics:
-        top_topics = ["rhythm", "reflection"]
-    return top_topics, scores
+    topics: List[str] = []
+    if tag_counts:
+        ranked_tags = sorted(tag_counts.items(), key=lambda item: item[1], reverse=True)
+        topics.extend([tag for tag, _ in ranked_tags])
+
+    if len(topics) < 2:
+        ranked_topics = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+        for key, score in ranked_topics:
+            if score > 0 and key not in topics:
+                topics.append(key)
+            if len(topics) >= 4:
+                break
+
+    if len(topics) < 2:
+        ranked_periods = sorted(period_counts.items(), key=lambda item: item[1], reverse=True)
+        for period, count in ranked_periods:
+            if count > 0 and period not in topics:
+                topics.append(period)
+            if len(topics) >= 2:
+                break
+
+    if not topics:
+        topics = ["rhythm", "reflection"]
+
+    return topics[:4], scores, tag_counts
+
 
 
 def _build_rules_payload(
-    logs: List[DayLog],
-    window_start: date,
-    window_end: date,
-    logged_days: int,
-    missing_dates: List[str],
+    weekly_context: Dict[str, Any],
     top_topics: List[str],
     top_topic_labels: List[str],
     topic_scores: Dict[str, int],
+    tag_counts: Dict[str, int],
     lang: str,
 ) -> Dict[str, Any]:
-    opener = _opener_for_counts(logged_days, len(missing_dates), lang)
-    highlights = _build_highlights(logged_days, top_topics, top_topic_labels, lang)
+    stats = weekly_context.get("stats", {})
+    missing_dates = stats.get("missing_dates", [])
+    opener = _opener_for_counts(stats.get("logged_days", 0), len(missing_dates), lang)
+    highlights = _build_highlights(weekly_context, top_topic_labels, lang)
     gaps = _build_gaps(missing_dates, lang)
-    next_steps = _build_next_steps(logged_days, len(missing_dates), lang)
+    next_steps = _build_next_steps(weekly_context, lang)
 
+    window = weekly_context.get("window", {})
     return {
         "opener": opener,
         "highlights": highlights,
         "gaps": gaps,
         "next_steps": next_steps,
         "metrics": {
-            "window_start": window_start.isoformat(),
-            "window_end": window_end.isoformat(),
+            "window_start": window.get("start"),
+            "window_end": window.get("end"),
         },
     }
+
 
 
 def _opener_for_counts(logged_days: int, missing_count: int, lang: str) -> str:
     if lang == "en":
         if logged_days >= 5:
-            return "✨ You kept a steady rhythm this week; your notes show real momentum."
+            return "? You kept a steady rhythm this week; your notes show real presence."
         if logged_days >= 3:
-            return "🌤️ Nice consistency this week—let’s keep the pace gentle and steady."
+            return "??? Nice consistency this week?let's keep it gentle and steady."
         if logged_days >= 1:
-            return "🤍 It’s okay if the week felt messy. Even a few notes matter."
-        return "🫶 No entries this week is okay—whenever you’re ready, we can start today."
+            return "?? Even a few notes matter. Thanks for showing up for yourself."
+        return "?? No entries this week is okay?whenever you're ready, we can start today."
     if logged_days >= 5:
-        return "✨ 这一周你很有节奏感，记录里能感受到你的推进力。"
+        return "? ?????????????????????"
     if logged_days >= 3:
-        return "🌤️ 这周记录还不错，我们一起把节奏稳住。"
+        return "??? ??????????????????????"
     if logged_days >= 1:
-        return "🤍 这一周有些忙乱也没关系，愿意记录就已经很棒了。"
-    return "🫶 这一周没有记录也没关系，我们随时可以从今天开始。"
+        return "?? ?????????????????"
+    return "?? ???????????????????????"
+
 
 
 def _build_highlights(
-    logged_days: int,
-    top_topics: List[str],
+    weekly_context: Dict[str, Any],
     top_topic_labels: List[str],
     lang: str,
 ) -> List[str]:
+    stats = weekly_context.get("stats", {})
+    logged_days = stats.get("logged_days", 0)
     highlights: List[str] = []
     if logged_days == 0:
         if lang == "en":
             return ["This week felt like a soft pause", "Giving yourself space is also care"]
-        return ["这一周像是一次缓冲的空档", "留给自己一些空间也是一种照顾"]
+        return ["??????????", "?????????"]
 
     for topic in top_topic_labels[:3]:
         if lang == "en":
             highlights.append(f"In your notes, {topic} stood out this week.")
         else:
-            highlights.append(f"本周的记录里，{topic}是比较突出的主题。")
+            highlights.append(f"???????{topic}?????????")
     if len(highlights) < 2:
         if lang == "en":
-            highlights.append("You left your own rhythm across different moments.")
+            highlights.append(f"You left notes on {logged_days} day(s), which is real evidence of care.")
         else:
-            highlights.append("你在不同片段里留下了属于自己的节奏。")
+            highlights.append(f"????{logged_days}??????????????????")
+    if len(highlights) < 2:
+        if lang == "en":
+            highlights.append("Your week carries its own rhythm across small moments.")
+        else:
+            highlights.append("???????????????")
 
     return highlights[:4]
+
 
 
 def _build_gaps(missing_dates: List[str], lang: str) -> Dict[str, Any]:
@@ -279,52 +499,88 @@ def _build_gaps(missing_dates: List[str], lang: str) -> Dict[str, Any]:
     }
 
 
-def _build_next_steps(logged_days: int, missing_count: int, lang: str) -> List[str]:
+def _build_next_steps(weekly_context: Dict[str, Any], lang: str) -> List[str]:
+    stats = weekly_context.get("stats", {})
+    missing_dates = stats.get("missing_dates", [])
+    logged_days = stats.get("logged_days", 0)
+    daily_plan_rate = stats.get("daily_plan_rate", 0.0)
+    habits = weekly_context.get("habits", [])
+
     steps: List[str] = []
-    if missing_count:
+    if missing_dates:
         steps.append(
-            "Pick one day and add 2-3 lines—no need to be complete."
+            "Pick one missing day and add 2-3 lines - no need to be complete."
             if lang == "en"
-            else "挑 1 天补记 2-3 句就好，不用追求完整。"
+            else "? 1 ??? 2-3 ???????????"
         )
-    if logged_days == 0:
-        steps.append(
-            'Write one line tonight: "the thing I cared most about today."'
-            if lang == "en"
-            else "今晚先写一句“今天最在意的事”。"
-        )
-    else:
-        steps.append(
-            "Keep the most energizing tiny habit and move gently forward."
-            if lang == "en"
-            else "保留最有能量的一条小习惯，继续轻轻推进。"
-        )
+
+    low_habit = _pick_low_habit(habits)
+    if low_habit:
+        completion = low_habit.get("completion", {})
+        done = completion.get("done_count", 0)
+        expected = completion.get("expected", 0)
+        title = low_habit.get("title", "")
+        if lang == "en":
+            steps.append(
+                f"Try a lighter version of {title} this week ({done}/{expected})."
+            )
+        else:
+            steps.append(f"? {title} ???????{done}/{expected}??")
+
+    if not steps:
+        if logged_days == 0:
+            steps.append(
+                "Write one gentle line tonight: 'the thing I cared most about today.'"
+                if lang == "en"
+                else "???????'??????????'"
+            )
+        elif daily_plan_rate and daily_plan_rate < 0.6:
+            steps.append(
+                "Pick one easy plan item each day to keep the chain warm."
+                if lang == "en"
+                else "???????????????????????"
+            )
+        else:
+            steps.append(
+                f"Keep the rhythm you already built across {logged_days} day(s)."
+                if lang == "en"
+                else f"????????? {logged_days} ??????????"
+            )
+
     return steps[:2]
 
 
+
 def _try_llm_generation(
-    model_key: str, api_key: str, rule_payload: Dict[str, Any], lang: str
+    model_key: str, api_key: str, weekly_context: Dict[str, Any], lang: str
 ) -> tuple[Optional[Dict[str, Any]], str, Dict[str, Any]]:
-    base_payload = {
-        "opener": rule_payload["opener"],
-        "highlights": rule_payload["highlights"],
-        "gaps": rule_payload["gaps"],
-        "next_steps": rule_payload["next_steps"],
-    }
+    context_missing_dates = weekly_context.get("stats", {}).get("missing_dates", [])
     if lang == "en":
         prompt = (
-            "You are a kind weekly reflection assistant. Generate JSON based on the input."
-            "Fields: opener(1 sentence with emoji), highlights(2-4),"
-            "gaps(missing_dates/message/links), next_steps(1-2)."
-            "Tone: gentle, non-judgmental. Output JSON only."
-            f"Input reference: {json.dumps(base_payload, ensure_ascii=False)}"
+            "You are a kind weekly reflection assistant."
+            "Use weekly_context as the only source. Do not invent details."
+            "Output JSON only with fields: opener(1 sentence with emoji),"
+            "highlights(2-4 items), gaps(missing_dates/message/links),"
+            "next_steps(1-2 items), metrics(object)."
+            "Highlights must reference tags/topics in weekly_context."
+            "At least one next_step must be tied to real patterns in weekly_context"
+            " (missing_dates, habit completion, or plan completion)."
+            f"weekly_context: {json.dumps(weekly_context, ensure_ascii=False)}"
         )
     else:
         prompt = (
-            "你是情绪价值回顾助手，请根据输入数据生成 JSON。"
-            "输出字段：opener(1句含emoji)、highlights(2-4条)、gaps(包含missing_dates/message/links)、"
-            "next_steps(1-2条)。语气温柔不评判。仅输出JSON。"
-            f"输入参考：{json.dumps(base_payload, ensure_ascii=False)}"
+            "你是一位温柔、真诚的周度复盘助手。\n"
+            "你必须严格遵守：\n"
+            "1) weekly_context 是唯一事实来源，不得编造、不得脑补。\n"
+            "2) 输出必须是【纯 JSON】且可被 json.loads 解析。禁止 Markdown、禁止代码块、禁止额外解释文字。\n"
+            "3) 输出字段严格为：\n"
+            '   {"opener": str, "highlights": [str], '
+            '    "gaps": {"missing_dates":[str], "message": str, "links":[{"date": str, "url": str}]}, '
+            '    "next_steps": [str], "metrics": object}\n'
+            "4) highlights 必须引用 weekly_context 中出现过的主题/标签（topics/tags/关键词统计），不能泛泛而谈。\n"
+            "5) next_steps 至少 1 条必须与 weekly_context 的真实模式绑定（例如漏记 missing_dates、习惯完成率、计划完成情况）。\n"
+            "6) 语气要求：鼓励、低压、不评判；不要指责；不要做心理诊断。\n"
+            f"weekly_context: {json.dumps(weekly_context, ensure_ascii=False)}"
         )
 
     try:
@@ -361,13 +617,21 @@ def _try_llm_generation(
         debug["llm_raw_text"] = _truncate_text(raw_text)
         return None, "llm_missing_fields", debug
 
+    normalized_gaps = _normalize_gaps(gaps)
+    context_gaps = _build_gaps(context_missing_dates, lang)
+    normalized_gaps["missing_dates"] = context_gaps.get("missing_dates", [])
+    normalized_gaps["links"] = context_gaps.get("links", [])
+    if not normalized_gaps.get("message"):
+        normalized_gaps["message"] = context_gaps.get("message", "")
+
     return {
         "opener": opener,
         "highlights": highlights[:4],
-        "gaps": _normalize_gaps(gaps),
+        "gaps": normalized_gaps,
         "next_steps": next_steps[:2],
         "metrics": {},
     }, "", debug
+
 
 
 def _decorate_generator_mode(generator_mode: str, manual: bool) -> str:
@@ -405,19 +669,26 @@ def _topic_labels(lang: str) -> Dict[str, str]:
             "relationship": "relationships",
             "emotion": "emotions",
             "rest": "rest & recovery",
+            "morning": "morning notes",
+            "afternoon": "afternoon notes",
+            "evening": "evening notes",
             "rhythm": "daily rhythm",
             "reflection": "reflection",
         }
     return {
-        "health": "健康与身体",
-        "product": "项目与推进",
-        "learning": "学习与成长",
-        "relationship": "关系与陪伴",
-        "emotion": "情绪与感受",
-        "rest": "放松与修复",
-        "rhythm": "生活节奏",
-        "reflection": "记录感受",
+        "health": "?????",
+        "product": "?????",
+        "learning": "?????",
+        "relationship": "?????",
+        "emotion": "?????",
+        "rest": "?????",
+        "morning": "????",
+        "afternoon": "????",
+        "evening": "????",
+        "rhythm": "????",
+        "reflection": "????",
     }
+
 
 
 def _normalize_gaps(gaps: Dict[str, Any]) -> Dict[str, Any]:

@@ -32,6 +32,7 @@ class Executor:
         error = ""
         output_payload: Dict[str, Any] = {}
 
+        skill = None
         try:
             skill = self.registry.get(skill_name)
             data = skill.input_schema(**payload)
@@ -43,9 +44,12 @@ class Executor:
             output_payload = {"error": error}
         finally:
             duration_ms = int((time.time() - start) * 1000)
+            log_input = getattr(skill, "log_input", None) if skill else None
+            if log_input is None:
+                log_input = payload
             log = AgentRunLog(
                 skill_name=skill_name,
-                input_json=self._make_json_safe(payload),
+                input_json=self._make_json_safe(log_input),
                 output_json=self._make_json_safe(output_payload),
                 status=status,
                 error=error,
