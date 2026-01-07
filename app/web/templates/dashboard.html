@@ -239,20 +239,10 @@
       </div>
     </div>
 
-    <div class="bg-white p-5 rounded shadow-sm border border-slate-200">
-      <div class="flex items-center justify-between">
-        <div class="text-base font-semibold" data-i18n="dashboard.suggestions.title"></div>
-        <button
-          class="text-sm px-3 py-1 border border-slate-300 rounded"
-          hx-post="/suggestions/generate"
-          hx-target="#suggestion-list"
-          hx-indicator="#hx-indicator"
-          data-i18n="dashboard.suggestions.refresh"
-        ></button>
-      </div>
-      <div id="suggestion-list" class="mt-4">
-        {% include "partials/suggestions.html" %}
-      </div>
-    </div>
+    {% if weekly_reflection and not weekly_reflection_snoozed %}
+      {% include "partials/weekly_reflection.html" %}
+    {% elif weekly_reflection_snoozed %}
+      {% include "partials/weekly_reflection_empty.html" %}
+    {% endif %}
   </div>
 {% endblock %}

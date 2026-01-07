@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from app.agent.executor import Executor
 from app.agent.planner import Planner
 from app.agent.registry import SkillRegistry
+from app.config import load_env
 from app.db import get_session, init_db
 from app.seed import seed_db
 from app.skills import register_skills
@@ -12,6 +13,7 @@ from app.web.routes import router
 
 
 def create_app() -> FastAPI:
+    load_env()
     app = FastAPI(title="Life OS v1")
     registry = SkillRegistry()
     register_skills(registry)

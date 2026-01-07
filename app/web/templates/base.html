@@ -1,255 +1,562 @@
 <!DOCTYPE html>
+
 <html lang="en">
+
   <head>
+
     <meta charset="UTF-8" />
+
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
     <title>Life OS v1</title>
+
     <script src="https://cdn.tailwindcss.com"></script>
+
     <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+
     <link
+
       rel="stylesheet"
+
       href="https://cdn.jsdelivr.net/npm/@fontsource/space-grotesk@5.0.18/index.css"
+
     />
+
     <style>
+
       body {
+
         font-family: "Space Grotesk", ui-sans-serif, system-ui;
+
       }
+
       .emoji {
+
         font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", emoji,
+
           sans-serif;
+
         line-height: 1;
+
       }
+
+      .htmx-indicator {
+
+        display: none;
+
+      }
+
+      .htmx-indicator.htmx-request {
+
+        display: inline-flex;
+
+      }
+
     </style>
+
   </head>
+
   <body class="bg-slate-100 text-slate-900">
+
     <div class="min-h-screen flex">
+
       <aside
+
         id="sidebar"
+
         class="bg-white w-64 border-r border-slate-200 hidden md:flex flex-col"
+
       >
+
         <div class="px-6 py-5 text-xl font-semibold" data-i18n="common.app_name"></div>
+
         <nav class="flex-1 px-4 space-y-2 text-sm">
+
           <a class="block px-3 py-2 rounded hover:bg-slate-100" href="/dashboard" data-i18n="nav.dashboard"></a>
+
           <a class="block px-3 py-2 rounded hover:bg-slate-100" href="/goals" data-i18n="nav.goals"></a>
+
           <a class="block px-3 py-2 rounded hover:bg-slate-100" href="/plans" data-i18n="nav.plans"></a>
+
           <a class="block px-3 py-2 rounded hover:bg-slate-100" href="/logs" data-i18n="nav.logs"></a>
+
           <a class="block px-3 py-2 rounded hover:bg-slate-100" href="/reviews" data-i18n="nav.reviews"></a>
+
           <a class="block px-3 py-2 rounded hover:bg-slate-100" href="/settings" data-i18n="nav.settings"></a>
+
         </nav>
+
         <div class="px-4 py-4 text-xs text-slate-500" data-i18n="common.app_tagline"></div>
+
       </aside>
+
       <div class="flex-1 flex flex-col">
+
         <header class="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
+
           <div class="flex items-center gap-3">
+
             <button
+
               class="md:hidden inline-flex items-center justify-center rounded border border-slate-300 px-2 py-1 text-sm"
+
               onclick="document.getElementById('sidebar').classList.toggle('hidden')"
+
             >
+
               <span data-i18n="common.menu"></span>
+
             </button>
+
             <div class="font-semibold text-lg">{% block page_title %}{% endblock %}</div>
+
           </div>
+
           <div class="flex items-center gap-3 text-sm text-slate-500">
+
             <div data-i18n="common.app_version"></div>
+
             <div class="flex items-center gap-1 border border-slate-200 rounded p-1">
+
               <button
+
                 type="button"
+
                 class="px-2 py-1 rounded text-xs"
+
                 data-lang="zh"
+
                 data-i18n="lang.cn"
+
               ></button>
+
               <button
+
                 type="button"
+
                 class="px-2 py-1 rounded text-xs"
+
                 data-lang="en"
+
                 data-i18n="lang.en"
+
               ></button>
+
             </div>
+
           </div>
+
         </header>
+
         <main class="flex-1 px-6 py-6">
+
           <div class="mx-auto w-full max-w-6xl">{% block content %}{% endblock %}</div>
+
         </main>
+
         <footer class="border-t border-slate-200 bg-white px-6 py-4 text-xs text-slate-500">
+
           <div class="mx-auto w-full max-w-6xl flex flex-wrap items-center justify-between gap-2">
+
             <span>Version {{ app_version }}</span>
+
             <span>Developer {{ developer_id }}</span>
+
           </div>
+
         </footer>
+
       </div>
+
     </div>
 
+
+
     <div id="hx-indicator" class="fixed inset-0 hidden items-center justify-center bg-slate-900/30">
+
       <div class="bg-white px-4 py-3 rounded shadow text-sm" data-i18n="common.loading"></div>
+
     </div>
+
     <script>
+
       const I18N = {
+
         en: {
+
           common: {
+
             app_name: "Life OS",
+
             app_tagline: "Life OS v1",
+
             app_version: "Life OS v1",
+
             loading: "Loading...",
+
             menu: "Menu",
+
             save: "Save",
+
             cancel: "Cancel",
+
             delete: "Delete",
+
             edit: "Edit",
+
           },
+
           lang: { cn: "CN", en: "EN" },
+
           nav: {
+
             dashboard: "Dashboard",
+
             goals: "Goals",
+
             plans: "Plans",
+
             logs: "Logs",
+
             reviews: "Reviews",
+
             settings: "Settings",
+
           },
+
           dashboard: {
+
             overload: {
+
               title: "Overload warning",
+
               reason: {
+
                 too_many: "Today has over 8 items. Consider reducing or splitting tasks.",
+
                 low_completion:
+
                   "Completion rate stayed low for a week. Consider lowering plan volume.",
+
               },
+
             },
+
             today_log_overview: "Today log overview",
+
             log_overview_empty: "No entry yet.",
+
             go_logs_edit: "Open Logs to edit today's entry",
+
             today_plan: "Today plan",
+
             view_details: "View details",
+
             today_log: "Today log",
+
             log_status: { has: "Recorded", empty: "Not recorded" },
+
             write_log: "Write log",
+
             weekly_plan: {
+
               title: "Weekly plan",
+
               empty: "No weekly habits yet.",
+
               manage: "Manage habits",
+
               status: {
+
                 not_started: "Not started",
+
                 in_progress: "In progress",
+
                 near: "Nearly done",
+
                 completed: "Completed",
+
               },
+
             },
+
             objectives: {
+
               title: "Short-term objectives",
+
               empty: "No short-term objectives yet.",
+
               untitled: "Untitled objective",
+
               remaining_days: "- {days}d",
+
               manage: "Manage objectives",
+
             },
+
             habit_progress: {
+
               title: "Habit progress snapshot",
+
               prev_month: "Prev month",
+
               next_month: "Next month",
+
               week_rate: "This week completion",
+
               month_rate: "This month completion",
+
               daily_week_rate: "This week (daily plan)",
+
               weekly_week_rate: "This week (weekly plan)",
+
               daily_month_rate: "This month (daily plan)",
+
               weekly_month_rate: "This month (weekly plan)",
+
               no_items: "No items",
+
               since_start: "Since start_date",
+
               last_days: "Last {days} days",
+
               legend: { low: "low", mid: "mid", high: "high" },
+
               since_summary: "{days} days - avg completion {rate}%",
+
             },
+
             suggestions: { title: "Agent suggestions", refresh: "Refresh suggestions" },
+
+            weekly_reflection: {
+
+              title: "Weekly Reflection",
+
+              highlights: "Highlights",
+
+              gaps: "Gaps",
+
+              next_steps: "Next steps",
+
+              like: "👍 Like",
+              dislike: "👎 Dislike",
+
+              snooze_week: "Pause this week",
+
+              regenerate: "Regenerate",
+
+            },
+
           },
+
           plans: {
+
             daily_plan: { title: "Daily plan", empty: "No plan items yet." },
+
             daily_item: {
+
               add: "Add daily item",
+
               title_placeholder: "Daily item title",
+
               goal_optional: "Link goal (optional)",
+
               note_placeholder: "Note",
+
               save: "Save",
+
             },
+
             objective: {
+
               add: "Add short-term objective",
+
               title_placeholder: "Objective title",
+
               select_goal: "Select goal",
+
               note_placeholder: "Note",
+
               save: "Save",
+
             },
+
             objectives: {
+
               title: "Short-term objectives",
+
               empty: "No objectives yet.",
+
               untitled: "Untitled objective",
+
               complete: "Complete",
+
               delete: "Delete",
+
               due_status: "Due {date} - {status}",
+
               goal_format: " - Goal: {goal}",
+
               confirm_delete: "Delete this objective?",
+
             },
+
             habit: {
+
               title: "Recurring habits",
+
               empty: "No habits yet.",
+
               add: "Add habit",
+
               title_placeholder: "Habit title",
+
               save: "Save",
+
               frequency: { daily: "daily", weekly: "weekly" },
+
               frequency_from: "{frequency} - from {start}",
+
             },
+
           },
+
           plan_item: {
+
             mark_complete: "Mark complete",
+
             mark_incomplete: "Completed",
+
             delete_habit: "Delete habit",
+
             confirm_delete_habit:
+
               "Confirm delete Habit \"{title}\"? This will stop future weekly/daily generation.",
+
             confirm_delete_plan:
+
               "Confirm delete Plan \"{title}\"? This action cannot be undone.",
+
           },
+
           logs: {
+
             title: "Logs",
+
             period_log: "Period log table",
+
             period_prompt: "What did you do this {period}?",
+
             log_table: "Log table",
+
             filters: { tag: "Tag", plan_item: "Plan item", apply: "Filter" },
+
             single_day_edit: "Single day edit",
+
             invalid_date_notice: "Invalid date parameter; fell back to today.",
+
             info_text:
+
               "Edit today's entry on the dashboard. This page is for viewing or supplementing past logs.",
+
             go_dashboard: "Go to dashboard",
+
             journal_placeholder: "Markdown journal",
+
             tags_placeholder: "Tags (comma-separated)",
+
             save: "Save",
+
             align: "Auto align",
+
             markdown_preview: "Markdown preview",
+
             save_success: "Saved.",
+
           },
-          settings: { import_done: "Import completed." },
+
+          settings: {
+
+            import_done: "Import completed.",
+
+            llm: {
+
+              title: "LLM settings",
+
+              subtitle: "ModelScope API (OpenAI-compatible). Optional.",
+
+              key_placeholder: "LIFEOS_LLM_API_KEY",
+
+              key_present: "Key saved.",
+
+              key_source: { env: "Configured via env", settings: "Configured in app" },
+
+              model_placeholder: "LIFEOS_LLM_MODEL",
+
+              save_success: "Saved.",
+
+              save_error: "Save failed.",
+
+              save: "Save",
+
+            },
+
+          },
+
           log_table: {
+
             date: "Date",
+
             summary: "Period summary",
+
             tags: "Tags",
+
             actions: "Actions",
+
             view: "View",
+
             empty: "No logs yet.",
+
           },
+
           align: {
+
             title: "Auto align suggestions",
+
             complete: "Mark completed",
+
             match_habit: "Matched habit",
+
             empty: "No alignable items found.",
+
             done: "Aligned: {title}",
+
           },
+
           suggestions: {
+
             metrics: "Metrics: {metrics}",
+
             accept: "Accept",
+
             ignore: "Ignore",
+
             snooze: "Snooze",
+
             empty: "No suggestions",
+
           },
+
           error: { title: "Error", retry: "Retry" },
+
           status: { pending: "pending", completed: "completed", expired: "expired" },
+
           day: { mon: "Mon", tue: "Tue", wed: "Wed", thu: "Thu", fri: "Fri", sat: "Sat", sun: "Sun" },
+
           period: { morning: "Morning", afternoon: "Afternoon", evening: "Evening" },
+
         },
-        zh: {
+       zh: {
           common: {
             app_name: "Life OS",
             app_tagline: "本地优先的 Life OS v1",
@@ -269,6 +576,7 @@
             logs: "日志",
             reviews: "复盘",
             settings: "设置",
+
           },
           dashboard: {
             overload: {
@@ -320,7 +628,29 @@
               legend: { low: "低", mid: "中", high: "高" },
               since_summary: "已坚持{days}天 - 平均完成率{rate}%",
             },
-            suggestions: { title: "Agent 建议", refresh: "刷新建议" },
+
+            weekly_reflection: {
+
+              title: "每周心情",
+
+              highlights: "Highlights",
+
+              gaps: "Gaps",
+
+              next_steps: "Next steps",
+
+              like: "👍 喜欢",
+
+              dislike: "👎 不喜欢",
+
+              snooze_week: "放弃这周",
+
+              regenerate: "重新生成",
+
+              {#regenerate_rules: "重新生成 (规则)",#}
+
+            },
+
           },
           plans: {
             daily_plan: { title: "每日计划", empty: "暂无计划项" },
@@ -382,7 +712,33 @@
             markdown_preview: "Markdown 预览",
             save_success: "已保存",
           },
-          settings: { import_done: "导入完成" },
+                    settings: {
+
+            import_done: "导入完成.",
+
+            llm: {
+
+              title: "大模型设置",
+
+              subtitle: "ModelScope API (OpenAI-compatible). Optional.",
+
+              key_placeholder: "LIFEOS_LLM_API_KEY",
+
+              key_present: "Key 保存.",
+
+              key_source: { env: "Configured via env", settings: "Configured in app" },
+
+              model_placeholder: "LIFEOS_LLM_MODEL",
+
+              save_success: "已保存.",
+
+              save_error: "保存失败.",
+
+              save: "保存",
+
+            },
+
+          },
           log_table: {
             date: "日期",
             summary: "时段摘要",
@@ -411,185 +767,388 @@
           period: { morning: "上午", afternoon: "下午", evening: "晚上" },
         },
       };
-      const LOCALE_KEY = "lifeos.locale";
-      const defaultLocale = "zh";
-      let currentLocale = localStorage.getItem(LOCALE_KEY) || defaultLocale;
+
+          const LOCALE_KEY = "lifeos.locale";
+
+          const defaultLocale = "zh";
+
+          let currentLocale = localStorage.getItem(LOCALE_KEY) || defaultLocale;
+
+
+
+      function setLocaleCookie(locale) {
+
+        document.cookie = `lifeos_locale=${locale}; path=/; max-age=31536000`;
+
+      }
+
+
 
       function getDictValue(dict, key) {
+
         return key.split(".").reduce((acc, part) => (acc && acc[part] ? acc[part] : null), dict);
+
       }
+
+
 
       function resolveParams(params) {
+
         const resolved = {};
+
         Object.entries(params).forEach(([key, value]) => {
+
           if (key.endsWith("Key")) {
+
             const targetKey = key.slice(0, -3);
+
             resolved[targetKey] = t(value);
+
             return;
+
           }
+
           if (typeof value === "string" && value.startsWith("i18n:")) {
+
             resolved[key] = t(value.slice(5));
+
             return;
+
           }
+
           if (value && typeof value === "object") {
+
             resolved[key] = JSON.stringify(value);
+
             return;
+
           }
+
           resolved[key] = value;
+
         });
+
         return resolved;
+
       }
+
+
 
       function t(key, params = {}) {
+
         const dict = I18N[currentLocale] || {};
+
         let text = getDictValue(dict, key);
+
         if (!text) {
+
           return key;
+
         }
+
         if (typeof text !== "string") {
+
           return key;
+
         }
+
         const resolvedParams = resolveParams(params);
+
         return text.replace(/\{(\w+)\}/g, (match, paramKey) =>
+
           resolvedParams[paramKey] !== undefined ? resolvedParams[paramKey] : match
+
         );
+
       }
+
+
 
       function parseParams(raw) {
+
         if (!raw) return {};
+
         try {
+
           return JSON.parse(raw);
+
         } catch {
+
           return {};
+
         }
+
       }
+
+
 
       function applyTranslations(root = document) {
+
         root.querySelectorAll("[data-i18n]").forEach((el) => {
+
           const key = el.getAttribute("data-i18n");
+
           if (!key) return;
+
           const params = parseParams(el.getAttribute("data-i18n-params"));
+
           el.textContent = t(key, params);
+
         });
+
         root.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
+
           const key = el.getAttribute("data-i18n-placeholder");
+
           if (!key) return;
+
           const params = parseParams(el.getAttribute("data-i18n-params"));
+
           el.setAttribute("placeholder", t(key, params));
+
         });
+
         root.querySelectorAll("[data-i18n-title]").forEach((el) => {
+
           const key = el.getAttribute("data-i18n-title");
+
           if (!key) return;
+
           const params = parseParams(el.getAttribute("data-i18n-params"));
+
           el.setAttribute("title", t(key, params));
+
         });
+
         root.querySelectorAll("[data-i18n-value]").forEach((el) => {
+
           const key = el.getAttribute("data-i18n-value");
+
           if (!key) return;
+
           const params = parseParams(el.getAttribute("data-i18n-params"));
+
           el.setAttribute("value", t(key, params));
+
         });
+
         root.querySelectorAll("[data-i18n-attrs]").forEach((el) => {
+
           const raw = el.getAttribute("data-i18n-attrs");
+
           if (!raw) return;
+
           const attrs = parseParams(raw);
+
           Object.entries(attrs).forEach(([attrName, payload]) => {
+
             if (!payload || !payload.key) return;
+
             el.setAttribute(attrName, t(payload.key, payload.params || {}));
+
           });
+
         });
+
         document.documentElement.setAttribute("lang", currentLocale);
+
         document.title = t("common.app_version");
+
         document.querySelectorAll("[data-lang]").forEach((btn) => {
+
           btn.classList.toggle(
+
             "bg-slate-900 text-white",
+
             btn.getAttribute("data-lang") === currentLocale
+
           );
+
         });
+
       }
+
+
 
       function emojiForProgress(progress) {
+
         if (progress >= 100) return "\u{1F601}";
+
         if (progress >= 60) return "\u{1F60A}";
+
         if (progress >= 20) return "\u{1F4AA}";
+
         return "\u{1F61E}";
+
       }
+
+
 
       function emojiForPlan(progress) {
+
         if (progress >= 100) return "\u{1F603}";
+
         if (progress >= 50) return "\u{1F4AA}";
+
         return "\u{1F61E}";
+
       }
+
+
 
       function emojiForLog(status) {
+
         return status === "recorded" ? "\u{1F604}" : "\u{1F61E}";
+
       }
+
+
 
       function applyEmoji(root = document) {
+
         root.querySelectorAll("[data-emoji]").forEach((el) => {
+
           el.classList.add("emoji");
+
           const mode = el.getAttribute("data-emoji-mode");
+
           if (mode === "log") {
+
             const status = el.getAttribute("data-status") || "";
+
             el.textContent = emojiForLog(status);
+
             return;
+
           }
+
           const raw = el.getAttribute("data-progress");
+
           const progress = raw ? parseFloat(raw) : 0;
+
           if (mode === "plan") {
+
             el.textContent = emojiForPlan(progress);
+
           } else {
+
             el.textContent = emojiForProgress(progress);
+
           }
+
         });
+
       }
 
+
+
       document.body.addEventListener("htmx:beforeRequest", function () {
+
         document.getElementById("hx-indicator").classList.remove("hidden");
+
       });
+
       document.body.addEventListener("htmx:afterRequest", function () {
+
         document.getElementById("hx-indicator").classList.add("hidden");
+
       });
+
       document.body.addEventListener("htmx:afterSwap", function (event) {
+
         applyTranslations(event.target);
+
         applyEmoji(event.target);
+
       });
+
       document.addEventListener("DOMContentLoaded", function () {
+
+        setLocaleCookie(currentLocale);
+
         document.querySelectorAll("[data-lang]").forEach((btn) => {
+
           btn.addEventListener("click", function () {
+
             const nextLocale = btn.getAttribute("data-lang");
+
             if (!nextLocale) return;
+
             currentLocale = nextLocale;
+
             localStorage.setItem(LOCALE_KEY, currentLocale);
+
+            setLocaleCookie(currentLocale);
+
             applyTranslations(document);
+
             applyEmoji(document);
+
           });
+
         });
+
         const observer = new MutationObserver((mutations) => {
+
           mutations.forEach((mutation) => {
+
             if (mutation.type === "childList") {
+
               mutation.addedNodes.forEach((node) => {
+
                 if (node.nodeType === 1) {
+
                   applyEmoji(node);
+
                 }
+
               });
+
             } else if (mutation.type === "attributes") {
+
               const target = mutation.target;
+
               if (target && target.nodeType === 1) {
+
                 applyEmoji(target);
+
               }
+
             }
+
           });
+
         });
+
         observer.observe(document.body, {
+
           subtree: true,
+
           childList: true,
+
           attributes: true,
+
           attributeFilter: ["data-emoji", "data-emoji-mode", "data-progress", "data-status"],
+
         });
+
         applyTranslations(document);
+
         applyEmoji(document);
+
       });
+
     </script>
+
   </body>
+
 </html>
+
+
+
+
+
+
+
+
+

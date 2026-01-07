@@ -91,7 +91,7 @@ class DayLog(SQLModel, table=True):
 
 class Suggestion(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    habit_id: int = Field(foreign_key="habit.id")
+    habit_id: Optional[int] = Field(default=None, foreign_key="habit.id")
     type: str
     reason: str
     metrics_json: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
@@ -121,3 +121,5 @@ class AgentRunLog(SQLModel, table=True):
 class Settings(SQLModel, table=True):
     id: int = Field(default=1, primary_key=True)
     periods_json: List[str] = Field(default_factory=list, sa_column=Column(JSON))
+    llm_api_key: str = Field(default="", sa_column=Column(Text))
+    llm_model: str = "Qwen/Qwen2.5-Coder-32B-Instruct"

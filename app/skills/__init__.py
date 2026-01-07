@@ -11,6 +11,7 @@ from app.skills.plan_create_or_update_daily import get_skill as plan_create_or_u
 from app.skills.plan_toggle_complete import get_skill as plan_toggle_complete
 from app.skills.review_generate_monthly import get_skill as review_generate_monthly
 from app.skills.review_generate_yearly import get_skill as review_generate_yearly
+from app.skills.review_weekly_reflection import get_skill as review_weekly_reflection
 
 
 def register_skills(registry: SkillRegistry) -> None:
@@ -20,6 +21,7 @@ def register_skills(registry: SkillRegistry) -> None:
     registry.register(log_upsert_day_log())
     registry.register(review_generate_monthly())
     registry.register(review_generate_yearly())
+    registry.register(review_weekly_reflection())
     registry.register(agent_generate_suggestions())
     registry.register(export_json())
     registry.register(import_json())

@@ -8,6 +8,46 @@
       <input class="w-full border rounded px-3 py-2 text-sm" name="periods" value="{{ periods|join(', ') }}" />
       <button class="bg-slate-900 text-white px-4 py-2 rounded text-sm">保存</button>
     </form>
+    <form class="bg-white p-5 rounded border border-slate-200 shadow-sm space-y-4" method="post" action="/settings/llm">
+      <div class="text-base font-semibold" data-i18n="settings.llm.title"></div>
+      <div class="text-xs text-slate-500" data-i18n="settings.llm.subtitle"></div>
+      <div class="space-y-2">
+        <input
+          class="w-full border rounded px-3 py-2 text-sm"
+          type="password"
+          name="llm_api_key"
+          placeholder="LIFEOS_LLM_API_KEY"
+          data-i18n-placeholder="settings.llm.key_placeholder"
+        />
+        {% if llm_key_present %}
+          <div class="text-xs text-emerald-600" data-i18n="settings.llm.key_present"></div>
+          {% if llm_key_source %}
+            <div class="text-xs text-slate-500" data-i18n="settings.llm.key_source.{{ llm_key_source }}"></div>
+          {% endif %}
+          {% if llm_key_masked %}
+            <div class="text-xs text-slate-500">Key: {{ llm_key_masked }}</div>
+          {% endif %}
+        {% endif %}
+      </div>
+      <input
+        class="w-full border rounded px-3 py-2 text-sm"
+        name="llm_model"
+        value="{{ llm_model }}"
+        placeholder="LIFEOS_LLM_MODEL"
+        data-i18n-placeholder="settings.llm.model_placeholder"
+      />
+      {% if llm_status %}
+        {% if llm_status == "ok" %}
+          <div class="text-xs text-emerald-600" data-i18n="settings.llm.save_success"></div>
+        {% else %}
+          <div class="text-xs text-rose-600">
+            <span data-i18n="settings.llm.save_error"></span>
+            {% if llm_message %} {{ llm_message }}{% endif %}
+          </div>
+        {% endif %}
+      {% endif %}
+      <button class="bg-slate-900 text-white px-4 py-2 rounded text-sm" data-i18n="settings.llm.save"></button>
+    </form>
     <div class="bg-white p-5 rounded border border-slate-200 shadow-sm space-y-4">
       <div class="text-base font-semibold">导出</div>
       <div class="space-y-2 text-sm">
