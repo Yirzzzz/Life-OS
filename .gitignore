@@ -1,22 +1,64 @@
-# Ignore database files
-*.db
-*.sqlite3
-*.sqlite
+# ----------------------------
+# Python virtualenv / caches
+# ----------------------------
+.venv/
+venv/
+ENV/
+__pycache__/
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
 
-# Explicit database file names
-app.db
-lifeos.db
+# ----------------------------
+# Node / Next.js / frontend
+# ----------------------------
+node_modules/
+.next/
+out/
+dist/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
 
-# Local env/secrets
-.env
-.env.*
-!.env.example
+# ----------------------------
+# OS / Editor
+# ----------------------------
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
 
-# Logs
-logs/
-*.log
+# ----------------------------
+# Secrets / local overrides (extra)
+# ----------------------------
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.jks
 
-# Local settings overrides
-settings_local.json
-settings.local.json
-*.pyc
+# ----------------------------
+# Data dumps / exports (optional)
+# ----------------------------
+*.sql
+*.dump
+*.bak
+*.zip
+*.tar
+*.tar.gz
+*.7z
+
