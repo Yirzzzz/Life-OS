@@ -6,3 +6,16 @@
 # Explicit database file names
 app.db
 lifeos.db
+
+# Local env/secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+
+# Local settings overrides
+settings_local.json
+settings.local.json

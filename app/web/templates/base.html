@@ -157,6 +157,16 @@
               since_summary: "{days} days - avg completion {rate}%",
             },
             suggestions: { title: "Agent suggestions", refresh: "Refresh suggestions" },
+            weekly_reflection: {
+              title: "Weekly Reflection",
+              highlights: "Highlights",
+              gaps: "Gaps",
+              next_steps: "Next steps",
+              like: "👍 Like",
+              dislike: "👎 Dislike",
+              snooze_week: "Pause this week",
+              regenerate: "Regenerate",
+            },
           },
           plans: {
             daily_plan: { title: "Daily plan", empty: "No plan items yet." },
@@ -221,7 +231,20 @@
             markdown_preview: "Markdown preview",
             save_success: "Saved.",
           },
-          settings: { import_done: "Import completed." },
+          settings: {
+            import_done: "Import completed.",
+            llm: {
+              title: "LLM settings",
+              subtitle: "ModelScope API (OpenAI-compatible). Optional.",
+              key_placeholder: "LIFEOS_LLM_API_KEY",
+              key_present: "Key saved.",
+              key_source: { env: "Configured via env", settings: "Configured in app" },
+              model_placeholder: "LIFEOS_LLM_MODEL",
+              save_success: "Saved.",
+              save_error: "Save failed.",
+              save: "Save",
+            },
+          },
           log_table: {
             date: "Date",
             summary: "Period summary",
@@ -252,7 +275,7 @@
         zh: {
           common: {
             app_name: "Life OS",
-            app_tagline: "本地优先的 Life OS v1",
+            app_tagline: "Life OS v1",
             app_version: "Life OS v1",
             loading: "加载中...",
             menu: "菜单",
@@ -321,6 +344,16 @@
               since_summary: "已坚持{days}天 - 平均完成率{rate}%",
             },
             suggestions: { title: "Agent 建议", refresh: "刷新建议" },
+            weekly_reflection: {
+              title: "每周情绪回顾",
+              highlights: "本周亮点",
+              gaps: "本周漏记",
+              next_steps: "轻量建议",
+              like: "👍 喜欢",
+              dislike: "👎 不喜欢",
+              snooze_week: "暂不再提示本周",
+              regenerate: "重新生成",
+            },
           },
           plans: {
             daily_plan: { title: "每日计划", empty: "暂无计划项" },
@@ -382,7 +415,21 @@
             markdown_preview: "Markdown 预览",
             save_success: "已保存",
           },
-          settings: { import_done: "导入完成" },
+          settings: {
+            import_done: "导入完成",
+            llm: {
+              title: "LLM 设置",
+              subtitle: "ModelScope API（OpenAI 兼容），可选",
+              key_placeholder: "LIFEOS_LLM_API_KEY",
+              key_present: "已保存",
+              key_source: { env: "来自环境变量", settings: "来自应用配置" },
+              model_placeholder: "LIFEOS_LLM_MODEL",
+              save_success: "保存成功",
+              save_error: "保存失败：",
+              save: "保存",
+            },
+          },
+
           log_table: {
             date: "日期",
             summary: "时段摘要",
@@ -414,6 +461,10 @@
       const LOCALE_KEY = "lifeos.locale";
       const defaultLocale = "zh";
       let currentLocale = localStorage.getItem(LOCALE_KEY) || defaultLocale;
+
+      function setLocaleCookie(locale) {
+        document.cookie = `lifeos_locale=${locale}; path=/; max-age=31536000`;
+      }
 
       function getDictValue(dict, key) {
         return key.split(".").reduce((acc, part) => (acc && acc[part] ? acc[part] : null), dict);
@@ -555,12 +606,14 @@
         applyEmoji(event.target);
       });
       document.addEventListener("DOMContentLoaded", function () {
+        setLocaleCookie(currentLocale);
         document.querySelectorAll("[data-lang]").forEach((btn) => {
           btn.addEventListener("click", function () {
             const nextLocale = btn.getAttribute("data-lang");
             if (!nextLocale) return;
             currentLocale = nextLocale;
             localStorage.setItem(LOCALE_KEY, currentLocale);
+            setLocaleCookie(currentLocale);
             applyTranslations(document);
             applyEmoji(document);
           });

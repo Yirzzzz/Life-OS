@@ -1,0 +1,71 @@
+<div class="bg-white p-5 rounded shadow-sm border border-slate-200">
+  <div class="flex items-center justify-between">
+    <div class="text-base font-semibold" data-i18n="dashboard.weekly_reflection.title"></div>
+    {% if weekly_reflection.metrics.window_end %}
+      <div class="text-xs text-slate-500">{{ weekly_reflection.metrics.window_end }}</div>
+    {% endif %}
+  </div>
+  <div class="mt-3 text-sm text-slate-700">{{ weekly_reflection.opener }}</div>
+  {% if weekly_reflection.notice %}
+    <div class="mt-2 text-xs text-amber-600">{{ weekly_reflection.notice }}</div>
+  {% endif %}
+
+  <div class="mt-4 text-sm">
+    <div class="text-xs text-slate-500" data-i18n="dashboard.weekly_reflection.highlights"></div>
+    <ul class="mt-2 space-y-1 text-slate-700">
+      {% for item in weekly_reflection.highlights %}
+        <li>• {{ item }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+
+  {% if weekly_reflection.gaps and weekly_reflection.gaps.message %}
+    <div class="mt-4 text-sm">
+      <div class="text-xs text-slate-500" data-i18n="dashboard.weekly_reflection.gaps"></div>
+      <div class="mt-1 text-slate-600">{{ weekly_reflection.gaps.message }}</div>
+      {% if weekly_reflection.gaps.links %}
+        <div class="mt-2 flex flex-wrap gap-2">
+          {% for link in weekly_reflection.gaps.links %}
+            <a class="text-xs text-blue-600" href="{{ link.url }}">{{ link.date }}</a>
+          {% endfor %}
+        </div>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  <div class="mt-4 text-sm">
+    <div class="text-xs text-slate-500" data-i18n="dashboard.weekly_reflection.next_steps"></div>
+    <ul class="mt-2 space-y-1 text-slate-700">
+      {% for item in weekly_reflection.next_steps %}
+        <li>• {{ item }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+
+  <div class="mt-4 flex flex-wrap gap-2">
+    <form hx-post="/weekly-reflection/decide" hx-target="#weekly-reflection-card">
+      <input type="hidden" name="suggestion_id" value="{{ weekly_reflection.id }}" />
+      <input type="hidden" name="decision" value="like" />
+      <button class="px-2 py-1 text-xs border rounded" data-i18n="dashboard.weekly_reflection.like"></button>
+    </form>
+    <form hx-post="/weekly-reflection/decide" hx-target="#weekly-reflection-card">
+      <input type="hidden" name="suggestion_id" value="{{ weekly_reflection.id }}" />
+      <input type="hidden" name="decision" value="dislike" />
+      <button class="px-2 py-1 text-xs border rounded" data-i18n="dashboard.weekly_reflection.dislike"></button>
+    </form>
+    <form hx-post="/weekly-reflection/decide" hx-target="#weekly-reflection-card">
+      <input type="hidden" name="suggestion_id" value="{{ weekly_reflection.id }}" />
+      <input type="hidden" name="decision" value="snooze_week" />
+      <button class="px-2 py-1 text-xs border rounded" data-i18n="dashboard.weekly_reflection.snooze_week"></button>
+    </form>
+    <form
+      hx-post="/suggestions/weekly_reflection/regenerate"
+      hx-target="#weekly-reflection-card"
+      hx-indicator="#hx-indicator"
+    >
+      <input type="hidden" name="target_date" value="{{ weekly_reflection.metrics.window_end }}" />
+      <input type="hidden" name="window_days" value="7" />
+      <button class="px-2 py-1 text-xs border rounded" data-i18n="dashboard.weekly_reflection.regenerate"></button>
+    </form>
+  </div>
+</div>

@@ -40,7 +40,13 @@ def export_json(session: Session) -> Dict[str, object]:
 
 def export_json_text(session: Session) -> str:
     payload = export_json(session)
-    serializable = {key: [item.dict() for item in value] for key, value in payload.items()}
+    serializable: Dict[str, List[Dict[str, object]]] = {}
+    for key, value in payload.items():
+        items = [item.dict() for item in value]
+        if key == "settings":
+            for item in items:
+                item["llm_api_key"] = ""
+        serializable[key] = items
     return json.dumps(serializable, ensure_ascii=False, indent=2, default=str)
 
 

@@ -152,7 +152,7 @@
         zh: {
           common: {
             app_name: "Life OS",
-            app_tagline: "本地优先的 Life OS v1",
+            app_tagline: "Life OS v1",
             app_version: "Life OS v1",
             loading: "加载中...",
             menu: "菜单",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+import os
 from typing import Any, Dict, List, Optional
 
 import markdown
@@ -50,6 +51,13 @@ def _period_labels() -> Dict[str, str]:
     }
 
 
+def _get_locale(request: Request) -> str:
+    value = request.cookies.get("lifeos_locale", "")
+    if value in {"zh", "en"}:
+        return value
+    return "zh"
+
+
 def _ensure_day_log(session: Session, target_date: date) -> DayLog:
     log = session.exec(select(DayLog).where(DayLog.date == target_date)).first()
     if not log:
@@ -91,6 +99,10 @@ def _template_included(template: HabitTemplate, target_date: date) -> bool:
 
 def _week_start(target_date: date) -> date:
     return target_date - timedelta(days=target_date.weekday())
+
+
+def _week_end(target_date: date) -> date:
+    return _week_start(target_date) + timedelta(days=6)
 
 
 def _month_start(target_date: date) -> date:
@@ -524,10 +536,59 @@ def _parse_date_with_notice(value: Optional[str], fallback: date) -> tuple[date,
         return fallback, True
 
 
+def _day_bounds(target_date: date) -> tuple[datetime, datetime]:
+    start = datetime.combine(target_date, datetime.min.time())
+    end = start + timedelta(days=1)
+    return start, end
+
+
+def _weekly_reflection_snoozed(session: Session, as_of: date) -> bool:
+    week_start = datetime.combine(_week_start(as_of), datetime.min.time())
+    week_end = datetime.combine(_week_end(as_of) + timedelta(days=1), datetime.min.time())
+    row = session.exec(
+        select(SuggestionDecision)
+        .join(Suggestion, SuggestionDecision.suggestion_id == Suggestion.id)
+        .where(
+            Suggestion.type == "weekly_reflection",
+            SuggestionDecision.decision == "snooze_week",
+            SuggestionDecision.created_at >= week_start,
+            SuggestionDecision.created_at < week_end,
+        )
+    ).first()
+    return row is not None
+
+
+def _weekly_reflection_for_date(session: Session, as_of: date) -> Optional[Suggestion]:
+    start, end = _day_bounds(as_of)
+    return session.exec(
+        select(Suggestion)
+        .where(
+            Suggestion.type == "weekly_reflection",
+            Suggestion.created_at >= start,
+            Suggestion.created_at < end,
+        )
+        .order_by(Suggestion.created_at.desc())
+    ).first()
+
+
+def _format_weekly_reflection_card(suggestion: Suggestion) -> Dict[str, Any]:
+    metrics = suggestion.metrics_json or {}
+    return {
+        "id": suggestion.id,
+        "opener": metrics.get("opener") or suggestion.reason,
+        "highlights": metrics.get("highlights") or [],
+        "gaps": metrics.get("gaps") or {"missing_dates": [], "message": "", "links": []},
+        "next_steps": metrics.get("next_steps") or [],
+        "notice": metrics.get("notice") or "",
+        "metrics": metrics,
+    }
+
+
 @router.get("/", response_class=HTMLResponse)
 @router.get("/dashboard", response_class=HTMLResponse)
 def dashboard(request: Request, habit_month: Optional[str] = None) -> Response:
     session = _get_session(request)
+    executor = _get_executor(request)
     today = _today()
     anchor_date = today
     if habit_month:
@@ -579,8 +640,49 @@ def dashboard(request: Request, habit_month: Optional[str] = None) -> Response:
         }
         for obj in objectives
     ]
-    suggestions = session.exec(select(Suggestion).where(Suggestion.status == "open")).all()
+    suggestions = session.exec(
+        select(Suggestion).where(
+            Suggestion.status == "open", Suggestion.type != "weekly_reflection"
+        )
+    ).all()
     habit_progress = _habit_progress_summary(session, anchor_date)
+
+    weekly_reflection = None
+    weekly_reflection_snoozed = _weekly_reflection_snoozed(session, today)
+    if not weekly_reflection_snoozed:
+        lang = _get_locale(request)
+        suggestion = _weekly_reflection_for_date(session, today)
+        if suggestion:
+            existing_lang = (suggestion.metrics_json or {}).get("lang")
+            if existing_lang and existing_lang != lang:
+                try:
+                    executor.execute(
+                        session,
+                        "review.weekly_reflection",
+                        {
+                            "as_of": today,
+                            "window_days": 7,
+                            "lang": lang,
+                            "existing_id": suggestion.id,
+                        },
+                    )
+                except RuntimeError:
+                    suggestion = None
+                else:
+                    suggestion = _weekly_reflection_for_date(session, today)
+        if not suggestion:
+            try:
+                executor.execute(
+                    session,
+                    "review.weekly_reflection",
+                    {"as_of": today, "window_days": 7, "lang": lang},
+                )
+            except RuntimeError:
+                suggestion = None
+            else:
+                suggestion = _weekly_reflection_for_date(session, today)
+        if suggestion:
+            weekly_reflection = _format_weekly_reflection_card(suggestion)
 
     week_start = _week_start(today)
     week_end = week_start + timedelta(days=6)
@@ -706,6 +808,8 @@ def dashboard(request: Request, habit_month: Optional[str] = None) -> Response:
             "short_term_objectives": short_term_objectives,
             "weekly_plan_items": weekly_plan_items,
             "suggestions": suggestions,
+            "weekly_reflection": weekly_reflection,
+            "weekly_reflection_snoozed": weekly_reflection_snoozed,
             "overload": overload,
             "overload_reason": overload_reason,
             "period_rows": period_rows,
@@ -1320,7 +1424,11 @@ def generate_suggestions(request: Request) -> Response:
             {"request": request, "message": str(exc), "retry": "/dashboard"},
             status_code=400,
         )
-    suggestions = session.exec(select(Suggestion).where(Suggestion.status == "open")).all()
+    suggestions = session.exec(
+        select(Suggestion).where(
+            Suggestion.status == "open", Suggestion.type != "weekly_reflection"
+        )
+    ).all()
     return templates.TemplateResponse(
         "partials/suggestions.html",
         {"request": request, "suggestions": suggestions},
@@ -1349,10 +1457,77 @@ def decide_suggestion(
     )
     session.add(decision_row)
     session.commit()
-    suggestions = session.exec(select(Suggestion).where(Suggestion.status == "open")).all()
+    suggestions = session.exec(
+        select(Suggestion).where(
+            Suggestion.status == "open", Suggestion.type != "weekly_reflection"
+        )
+    ).all()
     return templates.TemplateResponse(
         "partials/suggestions.html",
         {"request": request, "suggestions": suggestions},
+    )
+
+
+@router.post("/weekly-reflection/decide", response_class=HTMLResponse)
+def decide_weekly_reflection(
+    request: Request,
+    suggestion_id: int = Form(...),
+    decision: str = Form(...),
+    note: str = Form(""),
+) -> Response:
+    session = _get_session(request)
+    suggestion = session.exec(select(Suggestion).where(Suggestion.id == suggestion_id)).first()
+    if not suggestion or suggestion.type != "weekly_reflection":
+        return Response(status_code=404)
+    suggestion.status = decision
+    session.add(suggestion)
+    decision_row = SuggestionDecision(
+        suggestion_id=suggestion_id, decision=decision, note=note
+    )
+    session.add(decision_row)
+    session.commit()
+    if decision == "snooze_week":
+        return templates.TemplateResponse(
+            "partials/weekly_reflection_empty.html",
+            {"request": request, "snoozed": True},
+        )
+    card = _format_weekly_reflection_card(suggestion)
+    return templates.TemplateResponse(
+        "partials/weekly_reflection.html",
+        {"request": request, "weekly_reflection": card},
+    )
+
+
+@router.post("/suggestions/weekly_reflection/regenerate", response_class=HTMLResponse)
+def regenerate_weekly_reflection(
+    request: Request,
+    target_date: Optional[str] = Form(None),
+    window_days: int = Form(7),
+) -> Response:
+    session = _get_session(request)
+    executor = _get_executor(request)
+    as_of = _parse_date(target_date, _today())
+    suggestion = _weekly_reflection_for_date(session, as_of)
+    lang = _get_locale(request)
+    payload = {"as_of": as_of, "window_days": window_days, "lang": lang}
+    if suggestion:
+        payload["existing_id"] = suggestion.id
+    payload["trigger"] = "manual_regenerate"
+    try:
+        executor.execute(session, "review.weekly_reflection", payload)
+    except RuntimeError as exc:
+        return templates.TemplateResponse(
+            "partials/error.html",
+            {"request": request, "message": str(exc), "retry": "/dashboard"},
+            status_code=400,
+        )
+    suggestion = _weekly_reflection_for_date(session, as_of)
+    if not suggestion:
+        return Response(status_code=404)
+    card = _format_weekly_reflection_card(suggestion)
+    return templates.TemplateResponse(
+        "partials/weekly_reflection.html",
+        {"request": request, "weekly_reflection": card},
     )
 
 
@@ -1409,8 +1584,26 @@ def review_yearly(request: Request, year: int = Form(...)) -> Response:
 def settings(request: Request) -> Response:
     session = _get_session(request)
     periods = _get_periods(session)
+    llm_status = request.query_params.get("llm_status", "")
+    settings_row = session.exec(select(Settings).where(Settings.id == 1)).first()
+    llm_model = (
+        settings_row.llm_model
+        if settings_row and settings_row.llm_model
+        else "Qwen/Qwen2.5-Coder-32B-Instruct"
+    )
+    env_key = os.getenv("LIFEOS_LLM_API_KEY", "").strip()
+    llm_key_present = bool(env_key or (settings_row and settings_row.llm_api_key))
+    llm_key_source = "env" if env_key else "settings" if llm_key_present else ""
     return templates.TemplateResponse(
-        "settings.html", {"request": request, "periods": periods}
+        "settings.html",
+        {
+            "request": request,
+            "periods": periods,
+            "llm_model": llm_model,
+            "llm_key_present": llm_key_present,
+            "llm_key_source": llm_key_source,
+            "llm_status": llm_status,
+        },
     )
 
 
@@ -1428,6 +1621,41 @@ def update_periods(
     session.add(settings)
     session.commit()
     return Response(status_code=303, headers={"Location": "/settings"})
+
+
+@router.post("/settings/llm", response_class=HTMLResponse)
+def update_llm_settings(
+    request: Request,
+    llm_api_key: str = Form(""),
+    llm_model: str = Form("Qwen/Qwen2.5-Coder-32B-Instruct"),
+) -> Response:
+    session = _get_session(request)
+    llm_model = llm_model.strip() or "Qwen/Qwen2.5-Coder-32B-Instruct"
+    settings_row = session.exec(select(Settings).where(Settings.id == 1)).first()
+    if not settings_row:
+        settings_row = Settings(id=1, periods_json=_get_periods(session))
+    if llm_api_key.strip():
+        settings_row.llm_api_key = llm_api_key.strip()
+    settings_row.llm_model = llm_model
+    try:
+        session.add(settings_row)
+        session.commit()
+    except Exception as exc:  # noqa: BLE001
+        periods = _get_periods(session)
+        llm_key_present = bool(settings_row.llm_api_key)
+        return templates.TemplateResponse(
+            "settings.html",
+            {
+                "request": request,
+                "periods": periods,
+                "llm_model": llm_model,
+                "llm_key_present": llm_key_present,
+                "llm_status": "error",
+                "llm_message": str(exc),
+            },
+            status_code=400,
+        )
+    return Response(status_code=303, headers={"Location": "/settings?llm_status=ok"})
 
 
 @router.get("/export/json", response_class=PlainTextResponse)
