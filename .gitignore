@@ -62,13 +62,10 @@ Desktop.ini
 *.tar.gz
 *.7z
 
-<<<<<<< HEAD
-# Explicit database file names
 app.db
 lifeos.db
 
 
 __pycache__/
 *.pyc
-=======
->>>>>>> rescue/real-weekly
+
