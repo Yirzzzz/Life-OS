@@ -62,6 +62,17 @@ Desktop.ini
 *.tar.gz
 *.7z
 
+# ----------------------------
+# Databases (SQLite)
+# ----------------------------
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.sqlite-journal
+*.sqlite3-journal
+
+# Explicit database file names (optional)
 app.db
 lifeos.db
 
