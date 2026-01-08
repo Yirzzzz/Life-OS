@@ -82,7 +82,7 @@ Life OS includes a **Weekly Reflection** card to help you review the past 7 days
 - **AI mode (optional)**
    If you want richer and more personalized reflections, you can enable AI generation via ModelScope.
 
-#### **Set your AI mode **
+#### Set your AI mode
 
 * Get your **LLM_API_KEY** from https://modelscope.cn/
 * In Llfe OS, go to  **Settings-LLM settings**, set your **LLM_API_KEY** and the **Model Name** ;
