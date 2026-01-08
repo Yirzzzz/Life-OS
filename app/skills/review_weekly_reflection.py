@@ -12,7 +12,14 @@ from sqlmodel import Session, select
 
 from app.agent.base import Skill
 from app.data.repo import get_settings
-from app.domain.models import DayLog, DailyPlan, HabitTemplate, PlanItem, Suggestion
+from app.domain.models import (
+    DayLog,
+    DailyPlan,
+    HabitTemplate,
+    PlanItem,
+    ShortTermObjective,
+    Suggestion,
+)
 
 logger = logging.getLogger(__name__)
 LLM_PROVIDER = "ModelScope"
@@ -50,27 +57,66 @@ class ReviewWeeklyReflectionSkill(Skill):
     def run(self, data: WeeklyReflectionInput, context: dict) -> WeeklyReflectionOutput:
         session: Session = context["session"]
         self.log_input = None
-        window_days = max(1, data.window_days)
+        requested_window_days = max(1, data.window_days)
         lang = data.lang if data.lang in {"zh", "en"} else "zh"
-        window_start = data.as_of - timedelta(days=window_days - 1)
+        default_window_start = data.as_of - timedelta(days=requested_window_days - 1)
+        system_start_date = _get_system_start_date(session)
+        effective_start = (
+            system_start_date
+            if system_start_date and system_start_date > default_window_start
+            else default_window_start
+        )
         window_end = data.as_of
+        if effective_start > window_end:
+            effective_start = window_end
+        window_days = (window_end - effective_start).days + 1
+
+        logs_default = session.exec(
+            select(DayLog).where(
+                DayLog.date >= default_window_start, DayLog.date <= window_end
+            )
+        ).all()
+        log_by_date_default = {log.date: log for log in logs_default}
+        window_dates_default = [
+            default_window_start + timedelta(days=offset)
+            for offset in range(requested_window_days)
+        ]
+        missing_dates_raw = [
+            target_date.isoformat()
+            for target_date in window_dates_default
+            if not _log_has_content(log_by_date_default.get(target_date))
+        ]
 
         logs = session.exec(
-            select(DayLog).where(DayLog.date >= window_start, DayLog.date <= window_end)
+            select(DayLog).where(
+                DayLog.date >= effective_start, DayLog.date <= window_end
+            )
         ).all()
         log_by_date = {log.date: log for log in logs}
 
-        window_dates = [window_start + timedelta(days=offset) for offset in range(window_days)]
+        window_dates = [
+            effective_start + timedelta(days=offset) for offset in range(window_days)
+        ]
         missing_dates = [
             target_date.isoformat()
             for target_date in window_dates
             if not _log_has_content(log_by_date.get(target_date))
         ]
         logged_days = window_days - len(missing_dates)
+        logger.info(
+            "weekly_reflection_window window_start=%s window_end=%s system_start_date=%s "
+            "effective_start=%s missing_dates_raw=%s missing_dates=%s",
+            default_window_start,
+            window_end,
+            system_start_date,
+            effective_start,
+            missing_dates_raw,
+            missing_dates,
+        )
 
         plans = session.exec(
             select(DailyPlan).where(
-                DailyPlan.date >= window_start, DailyPlan.date <= window_end
+                DailyPlan.date >= effective_start, DailyPlan.date <= window_end
             )
         ).all()
         plan_ids = [plan.id for plan in plans]
@@ -86,7 +132,7 @@ class ReviewWeeklyReflectionSkill(Skill):
         habits_context = _build_habits_context(
             session=session,
             items=items,
-            window_start=window_start,
+            window_start=effective_start,
             window_end=window_end,
         )
         logs_context = _build_logs_context(window_dates, log_by_date)
@@ -96,7 +142,7 @@ class ReviewWeeklyReflectionSkill(Skill):
         weekly_context = {
             "lang": lang,
             "window": {
-                "start": window_start.isoformat(),
+                "start": effective_start.isoformat(),
                 "end": window_end.isoformat(),
             },
             "logs": logs_context,
@@ -153,7 +199,7 @@ class ReviewWeeklyReflectionSkill(Skill):
             "logged_days": logged_days,
             "missing_dates": missing_dates,
             "top_topics": top_topic_labels,
-            "window_start": window_start.isoformat(),
+            "window_start": effective_start.isoformat(),
             "window_end": window_end.isoformat(),
             "daily_plan_rate": daily_plan_rate,
             "weekly_plan_done": weekly_plan_done,
@@ -208,7 +254,41 @@ def _log_has_content(log: Optional[DayLog]) -> bool:
     for entry in log.period_entries or []:
         if (entry.get("text", "") or "").strip():
             return True
+    for tag in log.tags or []:
+        if str(tag).strip():
+            return True
     return False
+
+
+def _get_system_start_date(session: Session) -> Optional[date]:
+    logs = session.exec(select(DayLog).order_by(DayLog.date)).all()
+    for log in logs:
+        if _log_has_content(log):
+            return log.date
+
+    fallback_dates: List[date] = []
+    earliest_plan_date = session.exec(
+        select(DailyPlan.date).order_by(DailyPlan.date).limit(1)
+    ).first()
+    if earliest_plan_date:
+        fallback_dates.append(earliest_plan_date)
+
+    if hasattr(PlanItem, "created_at"):
+        earliest_plan_item = session.exec(
+            select(PlanItem.created_at).order_by(PlanItem.created_at).limit(1)
+        ).first()
+        if earliest_plan_item:
+            fallback_dates.append(earliest_plan_item.date())
+
+    earliest_objective = session.exec(
+        select(ShortTermObjective.created_at)
+        .order_by(ShortTermObjective.created_at)
+        .limit(1)
+    ).first()
+    if earliest_objective:
+        fallback_dates.append(earliest_objective.date())
+
+    return min(fallback_dates) if fallback_dates else None
 
 
 def _normalize_text(text: str) -> str:
@@ -582,6 +662,9 @@ def _try_llm_generation(
             "   - At least 2 highlights summarize LOGS using tags/topics/keywords that appear in weekly_context.\n"
             "   - At least 1 highlight summarizes HABITS (completion, streaks, or consistency) from weekly_context.\n"
             "   - At least 1 highlight summarizes PLANS/OBJECTIVES (progress or completion) from weekly_context.\n"
+            "   - Any product/project names, habit names, plan item names, short-term objectives, or tags/keywords mentioned in the weekly context must be enclosed in quotation marks: 『…』..\n"
+            # "   - Do not apply quotes to dates or general terms; only real phrases in the weekly context should be quoted.\n",
+            # "   - Any product/project names, habit names, plan item names, short-term objectives, or tags/keywords mentioned in the weekly context must be enclosed in Chinese book quotation marks: 『…』.\n",
             "B) Gaps:\n"
             "   - gaps.missing_dates must list missing log dates from weekly_context (if none, empty array).\n"
             "   - gaps.message must mention BOTH (i) log coverage issues and (ii) habit/plan friction if evidenced.\n"
@@ -615,10 +698,12 @@ def _try_llm_generation(
             "\n"
             "覆盖要求（必须全部满足）：\n"
             "A) highlights 必须同时覆盖【日志 logs】与【习惯 habits / 计划 plans】：\n"
-            "   - 固定输出 4 条 highlights。\n"
+            "   - 固定至少输出 4 条 highlights。\n"
             "   - 至少 2 条必须总结日志（logs），且必须引用 weekly_context 中真实出现过的主题/标签/关键词（tags/topics/关键词统计）。\n"
             "   - 至少 1 条必须总结习惯（habits）的完成情况/连续性/波动（必须有 weekly_context 证据）。\n"
             "   - 至少 1 条必须总结计划或目标（plans/objectives）的完成/推进情况（必须有 weekly_context 证据）。\n"
+            "   - 禁止对日期和普通泛化词加上『』；只能对 weekly_context 中真实出现过的“原文短语”加『』，不得编造新名词。\n" 
+            "   - 只要你在输出中引用 weekly_context 里出现过的【产品/项目名、习惯名、计划项名、短期目标名、标签/关键词】等专有名词，必须用中文书名号样式包裹：『…』。\n"
             "B) gaps：\n"
             "   - gaps.missing_dates 仅从 weekly_context 读取漏记日期；没有则 []。\n"
             "   - gaps.message 必须同时提到：①日志覆盖问题（例如漏记/分布不均）②习惯或计划的阻力点（如果 weekly_context 中有完成率或未完成证据）。\n"
