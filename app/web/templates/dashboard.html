@@ -83,26 +83,7 @@
           <a class="text-blue-600" href="/plans" data-i18n="dashboard.weekly_plan.manage"></a>
         </div>
       </div>
-
-      <div class="bg-white p-5 rounded shadow-sm border border-slate-200">
-        <div class="text-xs text-slate-500" data-i18n="dashboard.today_log"></div>
-        <div class="text-3xl font-semibold flex items-center gap-2">
-          <span data-i18n="{{ 'dashboard.log_status.has' if log_has_content else 'dashboard.log_status.empty' }}"></span>
-          <span class="text-xl">
-            {% if log_has_content %}
-              😄
-            {% else %}
-              😞
-            {% endif %}
-          </span>
-        </div>
-        <div class="mt-3 text-sm">
-          <a class="text-blue-600" href="/logs?target_date={{ today }}" data-i18n="dashboard.write_log"></a>
-        </div>
-      </div>
-    </div>
-
-    <div class="bg-white p-5 rounded shadow-sm border border-slate-200">
+ <div class="bg-white p-5 rounded shadow-sm border border-slate-200">
       <div class="text-base font-semibold" data-i18n="dashboard.objectives.title"></div>
       {% if short_term_objectives %}
         <div class="mt-3 space-y-2 text-sm">
@@ -129,6 +110,25 @@
         <a class="text-blue-600" href="/plans" data-i18n="dashboard.objectives.manage"></a>
       </div>
     </div>
+{#      <div class="bg-white p-5 rounded shadow-sm border border-slate-200">#}
+{#        <div class="text-xs text-slate-500" data-i18n="dashboard.today_log"></div>#}
+{#        <div class="text-3xl font-semibold flex items-center gap-2">#}
+{#          <span data-i18n="{{ 'dashboard.log_status.has' if log_has_content else 'dashboard.log_status.empty' }}"></span>#}
+{#          <span class="text-xl">#}
+{#            {% if log_has_content %}#}
+{#              😄#}
+{#            {% else %}#}
+{#              😞#}
+{#            {% endif %}#}
+{#          </span>#}
+{#        </div>#}
+{#        <div class="mt-3 text-sm">#}
+{#          <a class="text-blue-600" href="/logs?target_date={{ today }}" data-i18n="dashboard.write_log"></a>#}
+{#        </div>#}
+{#      </div>#}
+    </div>
+
+
 
       <div class="bg-white p-5 rounded shadow-sm border border-slate-200">
         <div class="flex items-center justify-between">
