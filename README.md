@@ -9,7 +9,7 @@ Life OS is a simple yet powerful system designed to help individuals organize th
 - **Dynamic Daily and Weekly Plans** 📅 to manage tasks
 - **Real-time Habit Tracking** 💪 and progress monitoring
 - **Heatmap Visualization** 🔥 for habit progress
-- **Smart Recommendations** 🧠 powered by AI to optimize your schedule （TODO）
+- **Smart Weekly Reflection** 🧠 powered by AI to optimize your schedule 
 
 ## Installation 💻
 
@@ -68,3 +68,24 @@ This will start the app on the default port `8000`. Open your browser and naviga
 ```
 http://127.0.0.1:8000
 ```
+
+---
+
+### Weekly Reflection 🔍
+
+Life OS includes a **Weekly Reflection** card to help you review the past 7 days with a gentle, encouraging tone.
+
+#### Modes
+
+- **Rules mode (default)**
+   Works out of the box — no settings required. Reflections are generated locally based on your **Logs / Habits / Plans**.
+- **AI mode (optional)**
+   If you want richer and more personalized reflections, you can enable AI generation via ModelScope.
+
+#### **Set your AI mode **
+
+* Get your **LLM_API_KEY** from https://modelscope.cn/
+* In Llfe OS, go to  **Settings-LLM settings**, set your **LLM_API_KEY** and the **Model Name** ;
+* Then you can enjoy your own Weely Reflection like this 🎉 
+
+![image-20260108105610441](assets/image-20260108105610441.png)
