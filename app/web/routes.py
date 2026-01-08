@@ -537,6 +537,32 @@ def _parse_date_with_notice(value: Optional[str], fallback: date) -> tuple[date,
         return fallback, True
 
 
+def _goal_progress_payload(goal: Goal, today: date) -> Dict[str, Any]:
+    start_date = goal.start_date or today
+    end_date = goal.end_date or today
+    total_days = (end_date - start_date).days
+    elapsed_raw = (today - start_date).days
+    if total_days <= 0:
+        progress = 1.0 if today >= end_date else 0.0
+        elapsed_days = 0 if today < start_date else max(total_days, 0)
+        total_days = max(total_days, 0)
+    else:
+        progress = max(0.0, min(elapsed_raw / total_days, 1.0))
+        elapsed_days = max(0, min(elapsed_raw, total_days))
+    return {
+        "progress": progress,
+        "progress_pct": int(round(progress * 100)),
+        "elapsed_days": elapsed_days,
+        "total_days": total_days,
+    }
+
+
+def _goal_progress_labels(locale: str) -> Dict[str, str]:
+    if locale == "en":
+        return {"elapsed": "Elapsed", "days": "days"}
+    return {"elapsed": "已过去", "days": "天"}
+
+
 def _mask_key(value: str) -> str:
     value = (value or "").strip()
     if not value:
@@ -864,11 +890,28 @@ def api_info() -> Response:
 @router.get("/goals", response_class=HTMLResponse)
 def goals(request: Request) -> Response:
     session = _get_session(request)
+    locale = _get_locale(request)
     goals_list = session.exec(select(Goal)).all()
     milestones = session.exec(select(Milestone)).all()
+    today = _today()
+    goal_progress = {goal.id: _goal_progress_payload(goal, today) for goal in goals_list}
+    agent_message = (
+        "No LLM_API_KEY configured. Please set it in Settings  LLM Settings."
+        if locale == "en"
+        else "暂无可用 LLM_API_KEY（请到 Settings  LLM Settings 配置）"
+    )
+    agent_title = "Goal Analysis Agent" if locale == "en" else "Goal 分析 Agent"
     return templates.TemplateResponse(
         "goals.html",
-        {"request": request, "goals": goals_list, "milestones": milestones},
+        {
+            "request": request,
+            "goals": goals_list,
+            "milestones": milestones,
+            "goal_progress": goal_progress,
+            "goal_progress_labels": _goal_progress_labels(locale),
+            "goal_agent_message": agent_message,
+            "goal_agent_title": agent_title,
+        },
     )
 
 
@@ -900,13 +943,26 @@ def create_goal(
 @router.get("/goals/{goal_id}", response_class=HTMLResponse)
 def view_goal(request: Request, goal_id: int) -> Response:
     session = _get_session(request)
+    locale = _get_locale(request)
     goal = session.exec(select(Goal).where(Goal.id == goal_id)).first()
     if not goal:
         return Response(status_code=404)
     milestones = session.exec(select(Milestone).where(Milestone.goal_id == goal.id)).all()
     return templates.TemplateResponse(
         "partials/goal_card.html",
-        {"request": request, "goal": goal, "milestones": milestones},
+        {
+            "request": request,
+            "goal": goal,
+            "milestones": milestones,
+            "goal_progress": {goal.id: _goal_progress_payload(goal, _today())},
+            "goal_progress_labels": _goal_progress_labels(locale),
+            "goal_agent_message": (
+                "No LLM_API_KEY configured. Please set it in Settings  LLM Settings."
+                if locale == "en"
+                else "暂无可用 LLM_API_KEY（请到 Settings  LLM Settings 配置）"
+            ),
+            "goal_agent_title": "Goal Analysis Agent" if locale == "en" else "Goal 分析 Agent",
+        },
     )
 
 
@@ -948,7 +1004,21 @@ def update_goal(
     milestones = session.exec(select(Milestone).where(Milestone.goal_id == goal.id)).all()
     return templates.TemplateResponse(
         "partials/goal_card.html",
-        {"request": request, "goal": goal, "milestones": milestones},
+        {
+            "request": request,
+            "goal": goal,
+            "milestones": milestones,
+            "goal_progress": {goal.id: _goal_progress_payload(goal, _today())},
+            "goal_progress_labels": _goal_progress_labels(_get_locale(request)),
+            "goal_agent_message": (
+                "No LLM_API_KEY configured. Please set it in Settings  LLM Settings."
+                if _get_locale(request) == "en"
+                else "暂无可用 LLM_API_KEY（请到 Settings  LLM Settings 配置）"
+            ),
+            "goal_agent_title": (
+                "Goal Analysis Agent" if _get_locale(request) == "en" else "Goal 分析 Agent"
+            ),
+        },
     )
 
 
