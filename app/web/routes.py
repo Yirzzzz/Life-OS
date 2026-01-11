@@ -633,18 +633,17 @@ def _weekly_reflection_for_date(session: Session, as_of: date) -> Optional[Sugge
 def _goal_analysis_for_date(
     session: Session, goal_id: int, as_of: date
 ) -> Optional[Suggestion]:
-    start, end = _day_bounds(as_of)
     candidates = session.exec(
-        select(Suggestion).where(
-            Suggestion.type == "goal_analysis",
-            Suggestion.created_at >= start,
-            Suggestion.created_at < end,
-        )
+        select(Suggestion)
+        .where(Suggestion.type == "goal_analysis")
+        .order_by(Suggestion.created_at.desc())
+        .limit(100)
     ).all()
     as_of_value = as_of.isoformat()
     for suggestion in candidates:
         metrics = suggestion.metrics_json or {}
-        if metrics.get("goal_id") == goal_id and metrics.get("as_of") == as_of_value:
+        meta = metrics.get("metrics") or {}
+        if meta.get("goal_id") == goal_id and meta.get("as_of") == as_of_value:
             return suggestion
     return None
 
@@ -931,8 +930,12 @@ def goals(request: Request) -> Response:
     goals_list = session.exec(select(Goal)).all()
     milestones = session.exec(select(Milestone)).all()
     today = _today()
+    settings_row = session.exec(select(Settings).where(Settings.id == 1)).first()
+    env_key = os.getenv("LIFEOS_LLM_API_KEY", "").strip()
+    llm_key_present = bool(env_key or (settings_row.llm_api_key if settings_row else ""))
     goal_progress = {goal.id: _goal_progress_payload(goal, today) for goal in goals_list}
     goal_analyses: Dict[int, Dict[str, Any]] = {}
+    goal_agent_notice_by_id: Dict[int, str] = {}
     for goal in goals_list:
         suggestion = _goal_analysis_for_date(session, goal.id, today)
         if not suggestion:
@@ -947,8 +950,32 @@ def goals(request: Request) -> Response:
                 suggestion = _goal_analysis_for_date(session, goal.id, today)
             else:
                 suggestion = _goal_analysis_for_date(session, goal.id, today)
-        if suggestion:
-            goal_analyses[goal.id] = _format_goal_analysis_card(suggestion)
+        card = _format_goal_analysis_card(suggestion) if suggestion else None
+        has_content = bool(
+            card
+            and (
+                card.get("progress_summary")
+                or card.get("highlights")
+                or card.get("next_steps")
+                or card.get("risks")
+                or card.get("assumptions")
+                or card.get("ask_back")
+            )
+        )
+        if has_content:
+            goal_analyses[goal.id] = card
+        elif not llm_key_present:
+            goal_agent_notice_by_id[goal.id] = (
+                "No LLM_API_KEY configured. Please set it in Settings  LLM Settings."
+                if locale == "en"
+                else "暂未没有配置LLM_API_KEY. 请前往 Settings  LLM Settings进行配置"
+            )
+        else:
+            goal_agent_notice_by_id[goal.id] = (
+                "No goal analysis generated yet. Please click regenerate."
+                if locale == "en"
+                else "本次未生成内容，请点击重新生成。"
+            )
     agent_message = (
         "No LLM_API_KEY configured. Please set it in Settings  LLM Settings."
         if locale == "en"
@@ -966,6 +993,7 @@ def goals(request: Request) -> Response:
             "goal_agent_message": agent_message,
             "goal_agent_title": agent_title,
             "goal_analyses": goal_analyses,
+            "goal_agent_notice_by_id": goal_agent_notice_by_id,
         },
     )
 
@@ -1005,6 +1033,9 @@ def view_goal(request: Request, goal_id: int) -> Response:
         return Response(status_code=404)
     milestones = session.exec(select(Milestone).where(Milestone.goal_id == goal.id)).all()
     today = _today()
+    settings_row = session.exec(select(Settings).where(Settings.id == 1)).first()
+    env_key = os.getenv("LIFEOS_LLM_API_KEY", "").strip()
+    llm_key_present = bool(env_key or (settings_row.llm_api_key if settings_row else ""))
     suggestion = _goal_analysis_for_date(session, goal.id, today)
     if not suggestion:
         payload = {
@@ -1019,6 +1050,30 @@ def view_goal(request: Request, goal_id: int) -> Response:
         else:
             suggestion = _goal_analysis_for_date(session, goal.id, today)
     goal_analysis = _format_goal_analysis_card(suggestion) if suggestion else None
+    has_content = bool(
+        goal_analysis
+        and (
+            goal_analysis.get("progress_summary")
+            or goal_analysis.get("highlights")
+            or goal_analysis.get("next_steps")
+            or goal_analysis.get("risks")
+            or goal_analysis.get("assumptions")
+            or goal_analysis.get("ask_back")
+        )
+    )
+    goal_agent_notice = ""
+    if not has_content and not llm_key_present:
+        goal_agent_notice = (
+            "No LLM_API_KEY configured. Please set it in Settings  LLM Settings."
+            if locale == "en"
+            else "暂未没有配置LLM_API_KEY. 请前往 Settings  LLM Settings进行配置"
+        )
+    elif not has_content and llm_key_present:
+        goal_agent_notice = (
+            "No goal analysis generated yet. Please click regenerate."
+            if locale == "en"
+            else "本次未生成内容，请点击重新生成。"
+        )
     return templates.TemplateResponse(
         "partials/goal_card.html",
         {
@@ -1683,8 +1738,9 @@ def decide_goal_analysis(
                 "No LLM_API_KEY configured. Please set it in Settings  LLM Settings."
                 if locale == "en" else "暂未没有配置LLM_API_KEY. 请前往 Settings → LLM Settings进行配置"
             ),
-            "goal_agent_title": "Goal Analysis Agent" if locale == "en" else "Goal 鍒嗘瀽 Agent",
+            "goal_agent_title": "Goal Analysis Agent" if locale == "en" else "Goal 分析 Agent",
             "goal_analyses": {goal.id: goal_analysis} if goal_analysis else {},
+            "goal_agent_notice": goal_agent_notice,
         },
     )
 
@@ -1739,7 +1795,7 @@ def regenerate_goal_analysis(
                     ),
                     "goal_agent_title": "Goal Analysis Agent"
                     if locale == "en"
-                    else "Goal 鍒嗘瀽 Agent",
+                    else "Goal 分析 Agent",
                     "goal_analyses": {goal.id: card},
                 },
             )
@@ -1765,7 +1821,7 @@ def regenerate_goal_analysis(
                 "No LLM_API_KEY configured. Please set it in Settings  LLM Settings."
                 if locale == "en" else "暂未没有配置LLM_API_KEY. 请前往 Settings → LLM Settings进行配置"
             ),
-            "goal_agent_title": "Goal Analysis Agent" if locale == "en" else "Goal 鍒嗘瀽 Agent",
+            "goal_agent_title": "Goal Analysis Agent" if locale == "en" else "Goal 分析 Agent",
             "goal_analyses": {goal.id: goal_analysis},
         },
     )

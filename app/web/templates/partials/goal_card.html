@@ -58,7 +58,11 @@
   <div class="mt-4 rounded border border-slate-200 bg-slate-50 p-3">
     <div class="text-sm font-semibold">{{ goal_agent_title }}</div>
     {% set analysis = goal_analyses.get(goal.id) if goal_analyses else None %}
-    {% if analysis %}
+    {% set has_content = analysis and (
+      analysis.progress_summary or analysis.highlights or analysis.next_steps or
+      analysis.risks or analysis.assumptions or analysis.ask_back
+    ) %}
+    {% if has_content %}
       {% if analysis.notice %}
         <div class="mt-2 text-xs text-amber-600">{{ analysis.notice }}</div>
       {% endif %}
@@ -148,7 +152,10 @@
         </form>
       </div>
     {% else %}
-      <div class="mt-2 text-sm text-slate-600">{{ goal_agent_message }}</div>
+      {% set notice = goal_agent_notice_by_id.get(goal.id) if goal_agent_notice_by_id else goal_agent_notice %}
+      {% if notice %}
+        <div class="mt-2 text-sm text-slate-600">{{ notice }}</div>
+      {% endif %}
     {% endif %}
   </div>
 </div>
