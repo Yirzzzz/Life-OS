@@ -44,7 +44,7 @@ class GoalAnalysisInput(BaseModel):
 class GoalAnalysisOutput(BaseModel):
     progress_summary: str
     highlights: List[Dict[str, Any]]
-    risks: List[str]
+    risks: List[str] = ["暂无风险事件"]
     next_steps: List[str]
     assumptions: List[str]
     ask_back: str
@@ -109,25 +109,17 @@ class GoalAnalysisSkill(Skill):
 
         generator_mode = "rules"
         notice = ""
-        output = _run_rules_graph(payload)
         settings = get_settings(session)
         env_key = os.getenv("LIFEOS_LLM_API_KEY", "").strip()
         env_model = os.getenv("LIFEOS_LLM_MODEL", "").strip()
         llm_key = env_key or (settings.llm_api_key if settings else "")
         llm_model = env_model or (settings.llm_model if settings else "")
+        output = _run_rules_graph(payload, llm_model, llm_key)
         if not llm_key:
             notice = "暂无可用 LLM_API_KEY"
         force_rules = data.mode == "rules"
-        if llm_key and not force_rules:
-            llm_output, llm_error, llm_debug = _try_llm_generation(
-                llm_model, llm_key, payload
-            )
-            if llm_output:
-                output = llm_output
-                generator_mode = "llm"
-            else:
-                generator_mode = "llm_fallback_rules"
-                notice = _llm_notice(llm_error, data.lang, llm_debug.get("llm_error_summary", ""))
+        if force_rules and llm_key:
+            generator_mode = "llm_multi_node_forced_rules"
         if notice:
             output["notice"] = notice
 
@@ -311,12 +303,15 @@ def _build_payload(
     }
 
 
-def _run_rules_graph(payload: Dict[str, Any]) -> Dict[str, Any]:
+def _run_rules_graph(
+    payload: Dict[str, Any], model_key: str, api_key: str
+) -> Dict[str, Any]:
     graph = GoalAnalysisGraph()
-    result = graph.run(payload)
+    result = graph.run(payload, model_key, api_key)
     output = result.get("output", {})
-    output["intent"] = result.get("intent", {})
-    output["evidence"] = result.get("evidence", {})
+    output["intent"] = result.get("node_a", {})
+    output["evidence"] = result.get("node_c", {})
+    output["plan"] = result.get("node_b", {})
     return output
 
 

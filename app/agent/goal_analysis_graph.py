@@ -3,7 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 import re
+import json
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+
+from app.skills.review_weekly_reflection import LlmCallError, _call_llm, _clean_llm_text
 
 
 def _normalize_text(text: str) -> str:
@@ -118,16 +121,387 @@ def _build_highlights(
 
 @dataclass
 class GoalAnalysisGraph:
-    def run(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def run(
+        self,
+        payload: Dict[str, Any],
+        model_key: str,
+        api_key: str,
+    ) -> Dict[str, Any]:
         lang = payload.get("lang", "zh")
-        node_a = _intent_inference(payload, lang)
-        node_b = _evidence_collector(payload, node_a, lang)
-        node_c = _synthesize(payload, node_a, node_b, lang)
+        node_a, node_a_meta = _node_a(payload, model_key, api_key, lang)
+        node_b, node_b_meta = _node_b(payload, model_key, api_key, lang)
+        node_c, node_c_meta = _node_c(node_a, node_b, model_key, api_key, lang)
+        node_d, node_d_meta = _node_d(node_a, node_b, node_c, model_key, api_key, lang)
+        metrics = node_d.get("metrics", {})
+        metrics["node_a"] = node_a_meta
+        metrics["node_b"] = node_b_meta
+        metrics["node_c"] = node_c_meta
+        metrics["node_d"] = node_d_meta
+        node_d["metrics"] = metrics
         return {
-            "intent": node_a,
-            "evidence": node_b,
-            "output": node_c,
+            "node_a": node_a,
+            "node_b": node_b,
+            "node_c": node_c,
+            "output": node_d,
         }
+
+
+def _llm_json(
+    model_key: str, api_key: str, prompt: str, lang: str
+) -> tuple[Optional[Dict[str, Any]], str]:
+    try:
+        content, _, _, _ = _call_llm(model_key, api_key, prompt, lang)
+    except LlmCallError:
+        return None, "llm_error"
+    if not content:
+        return None, "llm_empty"
+    cleaned = _clean_llm_text(content)
+    try:
+        return json.loads(cleaned), ""
+    except json.JSONDecodeError:
+        return None, "llm_invalid_json"
+
+
+def _build_prompt_node_a(payload: Dict[str, Any], lang: str) -> str:
+    schema = (
+        '{"related_events":[{"event":str,"date":"YYYY-MM-DD","source_type":"log|plan|objective|milestone",'
+        '"source_id":int,"quote":str,"url":str}],"top_topics":[str],'
+        '"coverage_days":int,"window":{"start":"YYYY-MM-DD","end":"YYYY-MM-DD","days":int}}'
+    )
+    goal = payload.get("goal", {})
+    window = payload.get("window", {})
+    logs = payload.get("recent_logs", [])
+    plans = payload.get("recent_plan_items", [])
+    objectives = payload.get("short_term_objectives", [])
+    milestones = payload.get("milestones", [])
+    if lang == "en":
+        return (
+            "You are a goal event summarizer. Extract real events related to the goal. "
+            "Quote exact phrases only, do NOT fabricate. Return JSON only.\n"
+            f"Schema: {schema}\n"
+            f"goal: {json.dumps(goal, ensure_ascii=False)}\n"
+            f"window: {json.dumps(window, ensure_ascii=False)}\n"
+            f"logs: {json.dumps(logs, ensure_ascii=False)}\n"
+            f"plans: {json.dumps(plans, ensure_ascii=False)}\n"
+            f"objectives: {json.dumps(objectives, ensure_ascii=False)}\n"
+            f"milestones: {json.dumps(milestones, ensure_ascii=False)}"
+        )
+    return (
+        "你是目标事件总结器。提取与目标相关的真实事件，只引用原文，不要编造。仅输出JSON。\n"
+        f"Schema: {schema}\n"
+        f"goal: {json.dumps(goal, ensure_ascii=False)}\n"
+        f"window: {json.dumps(window, ensure_ascii=False)}\n"
+        f"logs: {json.dumps(logs, ensure_ascii=False)}\n"
+        f"plans: {json.dumps(plans, ensure_ascii=False)}\n"
+        f"objectives: {json.dumps(objectives, ensure_ascii=False)}\n"
+        f"milestones: {json.dumps(milestones, ensure_ascii=False)}"
+    )
+
+
+def _build_prompt_node_b(payload: Dict[str, Any], lang: str) -> str:
+    schema = (
+        '{"phase_plan":[{"phase":str,"goals":[str],"deliverables":[str],"milestones":[str]}],'
+        '"success_criteria":[str],"assumptions":[str]}'
+    )
+    goal = payload.get("goal", {})
+    window = payload.get("window", {})
+    if lang == "en":
+        return (
+            "You are a phased plan generator. Use only goal text and time horizon. "
+            "Keep it actionable and not overloaded. Output JSON only.\n"
+            f"Schema: {schema}\n"
+            f"goal: {json.dumps(goal, ensure_ascii=False)}\n"
+            f"window: {json.dumps(window, ensure_ascii=False)}"
+        )
+    return (
+        "你是阶段计划生成器。仅基于目标文本与时间跨度生成可执行计划，不要过载。仅输出JSON。\n"
+        f"Schema: {schema}\n"
+        f"goal: {json.dumps(goal, ensure_ascii=False)}\n"
+        f"window: {json.dumps(window, ensure_ascii=False)}"
+    )
+
+
+def _build_prompt_node_c(
+    node_a: Dict[str, Any], node_b: Dict[str, Any], lang: str
+) -> str:
+    schema = (
+        '{"inferred_intent":str,"current_mode":"搭建|修bug|打磨|上架|学习冲刺|论文冲刺|其他",'
+        '"scope_adjustment":{"verdict":"too_big|aligned|too_small|unclear","reason":str,'
+        '"adjusted_plan":[{"phase":str,"goals":[str],"deliverables":[str],"milestones":[str]}]},'
+        '"risks":[str],"constraints":[str],"confidence":0.0,"alignment":0.0}'
+    )
+    if lang == "en":
+        return (
+            "You are a feasibility adjuster. Compare evidence (node_a) vs plan (node_b). "
+            "Cite quotes from node_a in the reason. If evidence is sparse, shrink the plan. "
+            "Return JSON only.\n"
+            f"Schema: {schema}\n"
+            f"node_a: {json.dumps(node_a, ensure_ascii=False)}\n"
+            f"node_b: {json.dumps(node_b, ensure_ascii=False)}"
+        )
+    return (
+        "你是可行性校准器。对比node_a证据与node_b计划，理由必须引用node_a证据。证据少则收敛计划。仅输出JSON。\n"
+        f"Schema: {schema}\n"
+        f"node_a: {json.dumps(node_a, ensure_ascii=False)}\n"
+        f"node_b: {json.dumps(node_b, ensure_ascii=False)}"
+    )
+
+
+def _build_prompt_node_d(
+    node_a: Dict[str, Any],
+    node_b: Dict[str, Any],
+    node_c: Dict[str, Any],
+    lang: str,
+) -> str:
+    schema = (
+        '{"progress_summary":str,"highlights":[{"text":str,"evidence":[{"quote":str,"url":str}]}],'
+        '"next_steps":[str],"to_improve":[str],"assumptions":[str],"ask_back":str,"notice":str,'
+        '"metrics":{"coverage":0.0,"alignment":0.0,"confidence":0.0,"window_start":str,"window_end":str,'
+        '"generator_mode":"llm_multi_node"}}'
+    )
+    if lang == "en":
+        return (
+            "You are a synthesizer. Use node_a/node_b/node_c to produce the final card. "
+            "If coverage/confidence is low, only 1-2 minimal next steps. Output JSON only.\n"
+            f"Schema: {schema}\n"
+            f"node_a: {json.dumps(node_a, ensure_ascii=False)}\n"
+            f"node_b: {json.dumps(node_b, ensure_ascii=False)}\n"
+            f"node_c: {json.dumps(node_c, ensure_ascii=False)}"
+        )
+    return (
+        "你是总结器。基于node_a/node_b/node_c输出最终卡片。低coverage/confidence只给1-2条最小动作。仅输出JSON。\n"
+        f"Schema: {schema}\n"
+        f"node_a: {json.dumps(node_a, ensure_ascii=False)}\n"
+        f"node_b: {json.dumps(node_b, ensure_ascii=False)}\n"
+        f"node_c: {json.dumps(node_c, ensure_ascii=False)}"
+    )
+
+
+def _validate_node_a(data: Dict[str, Any]) -> bool:
+    return bool(
+        isinstance(data.get("related_events"), list)
+        and isinstance(data.get("top_topics"), list)
+        and isinstance(data.get("coverage_days"), int)
+        and isinstance(data.get("window"), dict)
+    )
+
+
+def _validate_node_b(data: Dict[str, Any]) -> bool:
+    return bool(
+        isinstance(data.get("phase_plan"), list)
+        and isinstance(data.get("success_criteria"), list)
+        and isinstance(data.get("assumptions"), list)
+    )
+
+
+def _validate_node_c(data: Dict[str, Any]) -> bool:
+    scope = data.get("scope_adjustment") or {}
+    return bool(
+        isinstance(data.get("inferred_intent"), str)
+        and isinstance(data.get("current_mode"), str)
+        and isinstance(scope.get("verdict"), str)
+        and isinstance(scope.get("reason"), str)
+        and isinstance(scope.get("adjusted_plan"), list)
+        and isinstance(data.get("confidence"), (int, float))
+        and isinstance(data.get("alignment"), (int, float))
+    )
+
+
+def _validate_node_d(data: Dict[str, Any]) -> bool:
+    return bool(
+        isinstance(data.get("progress_summary"), str)
+        and isinstance(data.get("highlights"), list)
+        and isinstance(data.get("next_steps"), list)
+        and isinstance(data.get("to_improve"), list)
+        and isinstance(data.get("assumptions"), list)
+        and isinstance(data.get("metrics"), dict)
+    )
+
+
+def _coverage_days(payload: Dict[str, Any]) -> int:
+    logs = payload.get("recent_logs", []) or []
+    return sum(1 for log in logs if _log_has_content(log))
+
+
+def _coverage_ratio(payload: Dict[str, Any]) -> float:
+    window_days = int((payload.get("window") or {}).get("days") or 0)
+    if window_days <= 0:
+        return 0.0
+    return _coverage_days(payload) / window_days
+
+
+def _fallback_node_a(payload: Dict[str, Any]) -> Dict[str, Any]:
+    events: List[Dict[str, Any]] = []
+    for log in payload.get("recent_logs", []) or []:
+        if not _log_has_content(log):
+            continue
+        quote = ""
+        if _has_text(log.get("journal_md", "")):
+            quote = _truncate_text(log.get("journal_md", ""), 160)
+        else:
+            for entry in log.get("period_entries", []) or []:
+                if _has_text(entry.get("text", "")):
+                    quote = _truncate_text(entry.get("text", ""), 160)
+                    break
+        if not quote:
+            continue
+        events.append(
+            {
+                "event": quote,
+                "date": log.get("date"),
+                "source_type": "log",
+                "source_id": 0,
+                "quote": quote,
+                "url": _evidence_link("log", log.get("date")),
+            }
+        )
+    window = payload.get("window", {})
+    return {
+        "related_events": events[:6],
+        "top_topics": [],
+        "coverage_days": _coverage_days(payload),
+        "window": {
+            "start": window.get("start"),
+            "end": window.get("end"),
+            "days": int(window.get("days") or 0),
+        },
+    }
+
+
+def _fallback_node_b(payload: Dict[str, Any], lang: str) -> Dict[str, Any]:
+    if lang == "en":
+        return {
+            "phase_plan": [
+                {
+                    "phase": "Phase 1",
+                    "goals": ["Clarify the next deliverable"],
+                    "deliverables": ["A small, shippable outcome"],
+                    "milestones": ["First usable checkpoint"],
+                }
+            ],
+            "success_criteria": ["One concrete deliverable completed"],
+            "assumptions": ["Timeline is flexible"],
+        }
+    return {
+        "phase_plan": [
+            {
+                "phase": "Phase 1",
+                "goals": ["明确下一步可交付成果"],
+                "deliverables": ["一个可交付的小成果"],
+                "milestones": ["首个可用里程碑"],
+            }
+        ],
+        "success_criteria": ["完成一个具体交付物"],
+        "assumptions": ["时间线可调整"],
+    }
+
+
+def _fallback_node_c(node_a: Dict[str, Any], node_b: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "inferred_intent": "Based on recent evidence, focus on immediate progress.",
+        "current_mode": "其他",
+        "scope_adjustment": {
+            "verdict": "unclear",
+            "reason": "Evidence is limited; keep scope small.",
+            "adjusted_plan": node_b.get("phase_plan") or [],
+        },
+        "risks": [],
+        "constraints": [],
+        "confidence": 0.4,
+        "alignment": 0.3,
+    }
+
+
+def _fallback_node_d(
+    payload: Dict[str, Any], node_a: Dict[str, Any], node_c: Dict[str, Any], lang: str
+) -> Dict[str, Any]:
+    window = payload.get("window", {})
+    coverage = _coverage_ratio(payload)
+    confidence = float(node_c.get("confidence") or 0.0)
+    alignment = float(node_c.get("alignment") or 0.0)
+    if lang == "en":
+        summary = "Recent activity suggests small but real progress."
+        next_steps = ["Pick one smallest task you can finish today."]
+    else:
+        summary = "近期行动显示已有小幅推进。"
+        next_steps = ["选一个今天就能完成的小任务。"]
+    highlights = []
+    for ev in (node_a.get("related_events") or [])[:2]:
+        highlights.append({"text": ev.get("event", ""), "evidence": [{"quote": ev.get("quote", ""), "url": ev.get("url", "")}]})
+    return {
+        "progress_summary": summary,
+        "highlights": highlights,
+        "next_steps": next_steps,
+        "to_improve": [],
+        "assumptions": node_c.get("constraints") or [],
+        "ask_back": "",
+        "notice": "",
+        "metrics": {
+            "coverage": coverage,
+            "alignment": alignment,
+            "confidence": confidence,
+            "window_start": window.get("start"),
+            "window_end": window.get("end"),
+            "generator_mode": "llm_multi_node",
+        },
+    }
+
+
+def _node_a(
+    payload: Dict[str, Any], model_key: str, api_key: str, lang: str
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    prompt = _build_prompt_node_a(payload, lang)
+    parsed, error = _llm_json(model_key, api_key, prompt, lang)
+    if parsed and _validate_node_a(parsed):
+        return parsed, {"mode": "llm"}
+    return _fallback_node_a(payload), {"mode": "fallback", "error": error}
+
+
+def _node_b(
+    payload: Dict[str, Any], model_key: str, api_key: str, lang: str
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    prompt = _build_prompt_node_b(payload, lang)
+    parsed, error = _llm_json(model_key, api_key, prompt, lang)
+    if parsed and _validate_node_b(parsed):
+        return parsed, {"mode": "llm"}
+    return _fallback_node_b(payload, lang), {"mode": "fallback", "error": error}
+
+
+def _node_c(
+    node_a: Dict[str, Any],
+    node_b: Dict[str, Any],
+    model_key: str,
+    api_key: str,
+    lang: str,
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    prompt = _build_prompt_node_c(node_a, node_b, lang)
+    parsed, error = _llm_json(model_key, api_key, prompt, lang)
+    if parsed and _validate_node_c(parsed):
+        return parsed, {"mode": "llm"}
+    return _fallback_node_c(node_a, node_b), {"mode": "fallback", "error": error}
+
+
+def _node_d(
+    node_a: Dict[str, Any],
+    node_b: Dict[str, Any],
+    node_c: Dict[str, Any],
+    model_key: str,
+    api_key: str,
+    lang: str,
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    prompt = _build_prompt_node_d(node_a, node_b, node_c, lang)
+    parsed, error = _llm_json(model_key, api_key, prompt, lang)
+    if parsed and _validate_node_d(parsed):
+        return parsed, {"mode": "llm"}
+    return _fallback_node_d(
+        {
+            "window": node_a.get("window", {}),
+            "recent_logs": [],
+        },
+        node_a,
+        node_c,
+        lang,
+    ), {"mode": "fallback", "error": error}
 
 
 def _intent_inference(payload: Dict[str, Any], lang: str) -> Dict[str, Any]:
