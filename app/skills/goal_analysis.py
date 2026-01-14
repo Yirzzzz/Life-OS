@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import json
 import logging
 import os
-from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
@@ -21,12 +19,6 @@ from app.domain.models import (
     PlanItem,
     ShortTermObjective,
     Suggestion,
-)
-from app.skills.review_weekly_reflection import (
-    LlmCallError,
-    _call_llm,
-    _clean_llm_text,
-    _llm_notice,
 )
 
 logger = logging.getLogger(__name__)
@@ -107,7 +99,6 @@ class GoalAnalysisSkill(Skill):
             lang=data.lang,
         )
 
-        generator_mode = "rules"
         notice = ""
         settings = get_settings(session)
         env_key = os.getenv("LIFEOS_LLM_API_KEY", "").strip()
@@ -119,12 +110,13 @@ class GoalAnalysisSkill(Skill):
             notice = "暂无可用 LLM_API_KEY"
         force_rules = data.mode == "rules"
         if force_rules and llm_key:
-            generator_mode = "llm_multi_node_forced_rules"
+            output["metrics"]["generator_mode"] = "llm_progress_replan_forced_rules"
         if notice:
             output["notice"] = notice
 
         metrics = output.get("metrics", {})
-        metrics["generator_mode"] = generator_mode
+        if "generator_mode" not in metrics:
+            metrics["generator_mode"] = "llm_progress_replan"
         metrics["goal_id"] = goal.id
         metrics["as_of"] = data.as_of.isoformat()
         if data.trigger == "manual_regenerate":
@@ -156,10 +148,10 @@ class GoalAnalysisSkill(Skill):
 
 def _goal_window(goal: Goal, as_of: date) -> tuple[date, date, int]:
     start_date = goal.start_date or as_of
-    days_since = max(1, (as_of - start_date).days + 1)
-    window_days = min(max(days_since, 7), 21)
-    window_end = as_of
-    window_start = max(start_date, window_end - timedelta(days=window_days - 1))
+    end_date = goal.end_date if goal.end_date and goal.end_date < as_of else as_of
+    window_start = start_date
+    window_end = end_date
+    window_days = max((window_end - window_start).days + 1, 1)
     return window_start, window_end, window_days
 
 
@@ -309,54 +301,36 @@ def _run_rules_graph(
     graph = GoalAnalysisGraph()
     result = graph.run(payload, model_key, api_key)
     output = result.get("output", {})
-    output["intent"] = result.get("node_a", {})
-    output["evidence"] = result.get("node_c", {})
+    node_a = result.get("node_a", {})
+    related_events = node_a.get("related_events") or []
+    evidence_quotes = [
+        {
+            "id": f"event-{idx}",
+            "quote": item.get("quote", ""),
+            "link": item.get("url", ""),
+            "source_type": item.get("source_type", ""),
+            "date": item.get("date", ""),
+        }
+        for idx, item in enumerate(related_events)
+        if item.get("quote")
+    ]
+    matched_evidence = [
+        {
+            "id": f"event-{idx}",
+            "quote": item.get("quote", ""),
+            "link": item.get("url", ""),
+            "source_type": item.get("source_type", ""),
+            "date": item.get("date", ""),
+            "score": 1.0,
+        }
+        for idx, item in enumerate(related_events)
+        if item.get("quote")
+    ]
+    node_a["evidence_quotes"] = evidence_quotes
+    output["intent"] = node_a
+    output["evidence"] = {"matched_evidence": matched_evidence}
     output["plan"] = result.get("node_b", {})
     return output
-
-
-def _build_prompt(payload: Dict[str, Any]) -> str:
-    schema = (
-        '{"progress_summary": str, "highlights": [{"text": str, "evidence_ids": [str]}], '
-        '"risks": [str], "next_steps": [str], "assumptions": [str], '
-        '"ask_back": str, "notice": str, '
-        '"metrics": {"coverage": number, "alignment": number, "confidence": number, '
-        '"window_start": str, "window_end": str, "generator_mode": str}}'
-    )
-    return (
-        "Return ONLY valid JSON matching this schema. "
-        "No markdown, no explanations. "
-        f"Schema: {schema}. "
-        f"context: {json.dumps(payload, ensure_ascii=False)}"
-    )
-
-
-def _try_llm_generation(
-    model_key: str, api_key: str, payload: Dict[str, Any]
-) -> tuple[Optional[Dict[str, Any]], str, Dict[str, Any]]:
-    prompt = _build_prompt(payload)
-    debug: Dict[str, Any] = {}
-    try:
-        content, finish_reason, used_response_format, response_meta = _call_llm(
-            model_key, api_key, prompt, payload.get("lang", "zh")
-        )
-    except LlmCallError as exc:
-        debug = exc.details
-        return None, "llm_error", debug
-    debug["llm_finish_reason"] = finish_reason
-    debug["llm_response_format"] = used_response_format
-    if response_meta:
-        debug.update(response_meta)
-    if not content:
-        return None, "llm_empty", debug
-    cleaned = _clean_llm_text(content)
-    try:
-        parsed = json.loads(cleaned)
-    except json.JSONDecodeError as exc:
-        debug["llm_parse_error"] = f"{exc}"
-        debug["llm_raw_text"] = content[:1200]
-        return None, "llm_invalid_json", debug
-    return parsed, "", debug
 
 
 def get_skill() -> Skill:
