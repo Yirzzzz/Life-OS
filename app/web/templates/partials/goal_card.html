@@ -25,8 +25,34 @@
       </button>
     </div>
   </div>
+  {% set progress = goal_progress.get(goal.id) if goal_progress else None %}
+  {% set actual_pct = goal_actual_progress.get(goal.id) if goal_actual_progress else None %}
+  {% if progress %}
+    <div class="mt-3 space-y-2">
+      <div class="flex items-center justify-between text-xs text-slate-500">
+        <div>
+          {{ goal_progress_labels.elapsed }} {{ progress.elapsed_days }}/{{ progress.total_days }}
+          {{ goal_progress_labels.days }}
+        </div>
+        <div class="font-medium text-slate-700">{{ progress.progress_pct }}%</div>
+      </div>
+      <div class="h-2 rounded bg-slate-100 overflow-hidden">
+        <div class="h-2 bg-emerald-500" style="width: {{ progress.progress_pct }}%"></div>
+      </div>
+      <div class="pt-2">
+        <div class="flex items-center justify-between text-xs text-slate-500">
+          <div>
+            实际进度{% if actual_pct is none %} <span class="text-slate-400">暂无数据</span>{% endif %}
+          </div>
+          <div class="font-medium text-slate-700">{{ actual_pct if actual_pct is not none else 0 }}%</div>
+        </div>
+        <div class="mt-2 h-2 rounded bg-slate-100 overflow-hidden">
+          <div class="h-2 bg-red-400" style="width: {{ actual_pct if actual_pct is not none else 0 }}%"></div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
   <div class="mt-3 text-sm text-slate-600 whitespace-pre-line">{{ goal.description_md }}</div>
-  <div class="mt-3 text-xs text-slate-500">Tags: {{ goal.tags|join(", ") if goal.tags else "None" }}</div>
   <div class="mt-4 border-t border-slate-100 pt-3">
     <div class="text-sm font-semibold">Milestones</div>
     <div class="mt-2 space-y-2">
@@ -40,5 +66,108 @@
         <div class="text-sm text-slate-400">No milestones yet.</div>
       {% endif %}
     </div>
+  </div>
+  <div class="mt-4 rounded border border-slate-200 bg-slate-50 p-3">
+    <div class="text-sm font-semibold">{{ goal_agent_title }}</div>
+    {% set analysis = goal_analyses.get(goal.id) if goal_analyses else None %}
+    {% set has_content = analysis and (
+      analysis.progress_summary or analysis.highlights or analysis.next_steps or
+      analysis.risks or analysis.assumptions or analysis.ask_back
+    ) %}
+    {% if has_content %}
+      {% if analysis.notice %}
+        <div class="mt-2 text-xs text-amber-600">{{ analysis.notice }}</div>
+      {% endif %}
+      <div class="mt-2 text-sm text-slate-700">{{ analysis.progress_summary }}</div>
+      {% if analysis.highlights %}
+        <div class="mt-3 text-xs text-slate-500">Highlights</div>
+        <div class="mt-1 space-y-1">
+          {% for item in analysis.highlights %}
+            <div class="text-sm text-slate-600">{{ item.text }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+      {% set matched = analysis.evidence.matched_evidence if analysis.evidence else [] %}
+      {% set quotes = analysis.intent.evidence_quotes if analysis.intent else [] %}
+      {% if matched or quotes %}
+        <div class="mt-3 text-xs text-slate-500">Evidence</div>
+        <div class="mt-1 space-y-1">
+          {% if matched %}
+            {% for item in matched %}
+              <div class="text-sm text-slate-600">
+                <a class="underline" href="{{ item.link }}">{{ item.quote }}</a>
+              </div>
+            {% endfor %}
+          {% else %}
+            {% for item in quotes %}
+              <div class="text-sm text-slate-600">
+                <a class="underline" href="{{ item.link }}">{{ item.quote }}</a>
+              </div>
+            {% endfor %}
+          {% endif %}
+        </div>
+      {% endif %}
+      {% if analysis.risks %}
+        <div class="mt-3 text-xs text-slate-500">Risks</div>
+        <div class="mt-1 space-y-1">
+          {% for item in analysis.risks %}
+            <div class="text-sm text-slate-600">{{ item }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+      {% if analysis.next_steps %}
+        <div class="mt-3 text-xs text-slate-500">Next steps</div>
+        <div class="mt-1 space-y-1">
+          {% for item in analysis.next_steps %}
+            <div class="text-sm text-slate-600">{{ item.text if item is mapping else item }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+      {% if analysis.assumptions %}
+        <div class="mt-3 text-xs text-slate-500">Assumptions</div>
+        <div class="mt-1 space-y-1">
+          {% for item in analysis.assumptions %}
+            <div class="text-sm text-slate-600">{{ item }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+      {% if analysis.ask_back %}
+        <div class="mt-3 text-xs text-slate-500">Ask back</div>
+        <div class="mt-1 text-sm text-slate-600">{{ analysis.ask_back }}</div>
+      {% endif %}
+      {% if analysis.metrics %}
+        <div class="mt-3 text-xs text-slate-400">
+          coverage {{ analysis.metrics.coverage }} · alignment {{ analysis.metrics.alignment }} · confidence {{ analysis.metrics.confidence }}
+        </div>
+      {% endif %}
+      <div class="mt-3 flex items-center gap-2">
+        <form hx-post="/suggestions/goal_analysis/decide" hx-target="closest .goal-card" hx-swap="outerHTML">
+          <input type="hidden" name="suggestion_id" value="{{ analysis.id }}" />
+          <input type="hidden" name="decision" value="like" />
+          <input type="hidden" name="goal_id" value="{{ goal.id }}" />
+          <button type="submit" class="px-2 py-1 text-xs border rounded">👍</button>
+        </form>
+        <form hx-post="/suggestions/goal_analysis/decide" hx-target="closest .goal-card" hx-swap="outerHTML">
+          <input type="hidden" name="suggestion_id" value="{{ analysis.id }}" />
+          <input type="hidden" name="decision" value="dislike" />
+          <input type="hidden" name="goal_id" value="{{ goal.id }}" />
+          <button type="submit" class="px-2 py-1 text-xs border rounded">👎</button>
+        </form>
+        <form
+          hx-post="/suggestions/goal_analysis/regenerate?mode=llm"
+          hx-target="closest .goal-card"
+          hx-swap="outerHTML"
+        >
+          <input type="hidden" name="goal_id" value="{{ goal.id }}" />
+          <input type="hidden" name="as_of" value="{{ analysis.metrics.as_of if analysis.metrics }}" />
+          <button type="submit" class="px-2 py-1 text-xs border rounded">Regenerate</button>
+        </form>
+      </div>
+    {% else %}
+      {% set notice = goal_agent_notice_by_id.get(goal.id) if goal_agent_notice_by_id else goal_agent_notice %}
+      {% if notice %}
+        <div class="mt-2 text-sm text-slate-600">{{ notice }}</div>
+      {% endif %}
+    {% endif %}
   </div>
 </div>

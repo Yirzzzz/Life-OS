@@ -537,6 +537,32 @@ def _parse_date_with_notice(value: Optional[str], fallback: date) -> tuple[date,
         return fallback, True
 
 
+def _goal_progress_payload(goal: Goal, today: date) -> Dict[str, Any]:
+    start_date = goal.start_date or today
+    end_date = goal.end_date or today
+    total_days = (end_date - start_date).days
+    elapsed_raw = (today - start_date).days
+    if total_days <= 0:
+        progress = 1.0 if today >= end_date else 0.0
+        elapsed_days = 0 if today < start_date else max(total_days, 0)
+        total_days = max(total_days, 0)
+    else:
+        progress = max(0.0, min(elapsed_raw / total_days, 1.0))
+        elapsed_days = max(0, min(elapsed_raw, total_days))
+    return {
+        "progress": progress,
+        "progress_pct": int(round(progress * 100)),
+        "elapsed_days": elapsed_days,
+        "total_days": total_days,
+    }
+
+
+def _goal_progress_labels(locale: str) -> Dict[str, str]:
+    if locale == "en":
+        return {"elapsed": "Elapsed", "days": "days"}
+    return {"elapsed": "已过去", "days": "天"}
+
+
 def _mask_key(value: str) -> str:
     value = (value or "").strip()
     if not value:
@@ -602,6 +628,56 @@ def _weekly_reflection_for_date(session: Session, as_of: date) -> Optional[Sugge
         )
         .order_by(Suggestion.created_at.desc())
     ).first()
+
+
+def _goal_analysis_for_date(
+    session: Session, goal_id: int, as_of: date
+) -> Optional[Suggestion]:
+    candidates = session.exec(
+        select(Suggestion)
+        .where(Suggestion.type == "goal_analysis")
+        .order_by(Suggestion.created_at.desc())
+        .limit(100)
+    ).all()
+    as_of_value = as_of.isoformat()
+    for suggestion in candidates:
+        metrics = suggestion.metrics_json or {}
+        meta = metrics.get("metrics") or {}
+        if meta.get("goal_id") == goal_id and meta.get("as_of") == as_of_value:
+            return suggestion
+    return None
+
+
+def _latest_goal_analysis(session: Session, goal_id: int) -> Optional[Suggestion]:
+    candidates = session.exec(
+        select(Suggestion)
+        .where(Suggestion.type == "goal_analysis")
+        .order_by(Suggestion.created_at.desc())
+        .limit(200)
+    ).all()
+    for suggestion in candidates:
+        metrics = suggestion.metrics_json or {}
+        meta = metrics.get("metrics") or {}
+        if meta.get("goal_id") == goal_id:
+            return suggestion
+    return None
+
+
+def _format_goal_analysis_card(suggestion: Suggestion) -> Dict[str, Any]:
+    metrics = suggestion.metrics_json or {}
+    return {
+        "id": suggestion.id,
+        "progress_summary": metrics.get("progress_summary") or suggestion.reason,
+        "highlights": metrics.get("highlights") or [],
+        "risks": metrics.get("risks") or [],
+        "next_steps": metrics.get("next_steps") or [],
+        "assumptions": metrics.get("assumptions") or [],
+        "ask_back": metrics.get("ask_back") or "",
+        "notice": metrics.get("notice") or "",
+        "metrics": metrics,
+        "intent": metrics.get("intent") or {},
+        "evidence": metrics.get("evidence") or {},
+    }
 
 
 def _format_weekly_reflection_card(suggestion: Suggestion) -> Dict[str, Any]:
@@ -864,11 +940,86 @@ def api_info() -> Response:
 @router.get("/goals", response_class=HTMLResponse)
 def goals(request: Request) -> Response:
     session = _get_session(request)
+    locale = _get_locale(request)
+    executor = _get_executor(request)
     goals_list = session.exec(select(Goal)).all()
     milestones = session.exec(select(Milestone)).all()
+    today = _today()
+    settings_row = session.exec(select(Settings).where(Settings.id == 1)).first()
+    env_key = os.getenv("LIFEOS_LLM_API_KEY", "").strip()
+    llm_key_present = bool(env_key or (settings_row.llm_api_key if settings_row else ""))
+    goal_progress = {goal.id: _goal_progress_payload(goal, today) for goal in goals_list}
+    goal_analyses: Dict[int, Dict[str, Any]] = {}
+    goal_actual_progress: Dict[int, Optional[int]] = {}
+    goal_agent_notice_by_id: Dict[int, str] = {}
+    for goal in goals_list:
+        latest_suggestion = _latest_goal_analysis(session, goal.id)
+        latest_metrics = (latest_suggestion.metrics_json or {}).get("metrics") if latest_suggestion else {}
+        progress_pct = latest_metrics.get("progress_pct")
+        if isinstance(progress_pct, (int, float)):
+            progress_pct = max(0, min(int(round(progress_pct)), 100))
+        else:
+            progress_pct = None
+        goal_actual_progress[goal.id] = progress_pct
+        suggestion = _goal_analysis_for_date(session, goal.id, today)
+        if not suggestion:
+            payload = {
+                "goal_id": goal.id,
+                "as_of": today,
+                "lang": locale,
+            }
+            try:
+                executor.execute(session, "review.goal_analysis", payload)
+            except RuntimeError:
+                suggestion = _goal_analysis_for_date(session, goal.id, today)
+            else:
+                suggestion = _goal_analysis_for_date(session, goal.id, today)
+        card = _format_goal_analysis_card(suggestion) if suggestion else None
+        has_content = bool(
+            card
+            and (
+                card.get("progress_summary")
+                or card.get("highlights")
+                or card.get("next_steps")
+                or card.get("risks")
+                or card.get("assumptions")
+                or card.get("ask_back")
+            )
+        )
+        if has_content:
+            goal_analyses[goal.id] = card
+        elif not llm_key_present:
+            goal_agent_notice_by_id[goal.id] = (
+                "No LLM_API_KEY configured. Please set it in Settings  LLM Settings."
+                if locale == "en"
+                else "暂未没有配置LLM_API_KEY. 请前往 Settings  LLM Settings进行配置"
+            )
+        else:
+            goal_agent_notice_by_id[goal.id] = (
+                "No goal analysis generated yet. Please click regenerate."
+                if locale == "en"
+                else "本次未生成内容，请点击重新生成。"
+            )
+    agent_message = (
+        "No LLM_API_KEY configured. Please set it in Settings  LLM Settings."
+        if locale == "en"
+        else "暂无可用 LLM_API_KEY（请到 Settings  LLM Settings 配置）"
+    )
+    agent_title = "Goal Analysis Agent" if locale == "en" else "Goal 分析 Agent"
     return templates.TemplateResponse(
         "goals.html",
-        {"request": request, "goals": goals_list, "milestones": milestones},
+        {
+            "request": request,
+            "goals": goals_list,
+            "milestones": milestones,
+            "goal_progress": goal_progress,
+            "goal_progress_labels": _goal_progress_labels(locale),
+            "goal_agent_message": agent_message,
+            "goal_agent_title": agent_title,
+            "goal_analyses": goal_analyses,
+            "goal_actual_progress": goal_actual_progress,
+            "goal_agent_notice_by_id": goal_agent_notice_by_id,
+        },
     )
 
 
@@ -900,13 +1051,70 @@ def create_goal(
 @router.get("/goals/{goal_id}", response_class=HTMLResponse)
 def view_goal(request: Request, goal_id: int) -> Response:
     session = _get_session(request)
+    locale = _get_locale(request)
+    executor = _get_executor(request)
     goal = session.exec(select(Goal).where(Goal.id == goal_id)).first()
     if not goal:
         return Response(status_code=404)
     milestones = session.exec(select(Milestone).where(Milestone.goal_id == goal.id)).all()
+    today = _today()
+    settings_row = session.exec(select(Settings).where(Settings.id == 1)).first()
+    env_key = os.getenv("LIFEOS_LLM_API_KEY", "").strip()
+    llm_key_present = bool(env_key or (settings_row.llm_api_key if settings_row else ""))
+    suggestion = _goal_analysis_for_date(session, goal.id, today)
+    if not suggestion:
+        payload = {
+            "goal_id": goal.id,
+            "as_of": today,
+            "lang": locale,
+        }
+        try:
+            executor.execute(session, "review.goal_analysis", payload)
+        except RuntimeError:
+            suggestion = _goal_analysis_for_date(session, goal.id, today)
+        else:
+            suggestion = _goal_analysis_for_date(session, goal.id, today)
+    goal_analysis = _format_goal_analysis_card(suggestion) if suggestion else None
+    has_content = bool(
+        goal_analysis
+        and (
+            goal_analysis.get("progress_summary")
+            or goal_analysis.get("highlights")
+            or goal_analysis.get("next_steps")
+            or goal_analysis.get("risks")
+            or goal_analysis.get("assumptions")
+            or goal_analysis.get("ask_back")
+        )
+    )
+    goal_agent_notice = ""
+    if not has_content and not llm_key_present:
+        goal_agent_notice = (
+            "No LLM_API_KEY configured. Please set it in Settings  LLM Settings."
+            if locale == "en"
+            else "暂未没有配置LLM_API_KEY. 请前往 Settings  LLM Settings进行配置"
+        )
+    elif not has_content and llm_key_present:
+        goal_agent_notice = (
+            "No goal analysis generated yet. Please click regenerate."
+            if locale == "en"
+            else "本次未生成内容，请点击重新生成。"
+        )
     return templates.TemplateResponse(
         "partials/goal_card.html",
-        {"request": request, "goal": goal, "milestones": milestones},
+        {
+            "request": request,
+            "goal": goal,
+            "milestones": milestones,
+            "goal_progress": {goal.id: _goal_progress_payload(goal, _today())},
+            "goal_progress_labels": _goal_progress_labels(locale),
+            "goal_analyses": {goal.id: goal_analysis} if goal_analysis else {},
+            "goal_agent_message": (
+                "No LLM_API_KEY configured. Please set it in Settings  LLM Settings."
+                if locale == "en"
+                else "暂无可用 LLM_API_KEY（请到 Settings  LLM Settings 配置）"
+            ),
+            "goal_agent_title": "Goal Analysis Agent" if locale == "en" else "Goal 分析 Agent",
+        },
     )
 
 
@@ -948,7 +1156,21 @@ def update_goal(
     milestones = session.exec(select(Milestone).where(Milestone.goal_id == goal.id)).all()
     return templates.TemplateResponse(
         "partials/goal_card.html",
-        {"request": request, "goal": goal, "milestones": milestones},
+        {
+            "request": request,
+            "goal": goal,
+            "milestones": milestones,
+            "goal_progress": {goal.id: _goal_progress_payload(goal, _today())},
+            "goal_progress_labels": _goal_progress_labels(_get_locale(request)),
+            "goal_agent_message": (
+                "No LLM_API_KEY configured. Please set it in Settings  LLM Settings."
+                if _get_locale(request) == "en"
+                else "暂无可用 LLM_API_KEY（请到 Settings  LLM Settings 配置）"
+            ),
+            "goal_agent_title": (
+                "Goal Analysis Agent" if _get_locale(request) == "en" else "Goal 分析 Agent"
+            ),
+        },
     )
 
 
@@ -1499,6 +1721,134 @@ def decide_suggestion(
     return templates.TemplateResponse(
         "partials/suggestions.html",
         {"request": request, "suggestions": suggestions},
+    )
+
+
+@router.post("/suggestions/goal_analysis/decide", response_class=HTMLResponse)
+def decide_goal_analysis(
+    request: Request,
+    suggestion_id: int = Form(...),
+    decision: str = Form(...),
+    note: str = Form(""),
+    goal_id: int = Form(...),
+) -> Response:
+    session = _get_session(request)
+    suggestion = session.exec(select(Suggestion).where(Suggestion.id == suggestion_id)).first()
+    if not suggestion or suggestion.type != "goal_analysis":
+        return Response(status_code=404)
+    suggestion.status = decision
+    session.add(suggestion)
+    decision_row = SuggestionDecision(
+        suggestion_id=suggestion_id, decision=decision, note=note
+    )
+    session.add(decision_row)
+    session.commit()
+    goal = session.exec(select(Goal).where(Goal.id == goal_id)).first()
+    if not goal:
+        return Response(status_code=404)
+    milestones = session.exec(select(Milestone).where(Milestone.goal_id == goal_id)).all()
+    locale = _get_locale(request)
+    today = _today()
+    suggestion = _goal_analysis_for_date(session, goal.id, today)
+    goal_analysis = _format_goal_analysis_card(suggestion) if suggestion else None
+    return templates.TemplateResponse(
+        "partials/goal_card.html",
+        {
+            "request": request,
+            "goal": goal,
+            "milestones": milestones,
+            "goal_progress": {goal.id: _goal_progress_payload(goal, today)},
+            "goal_progress_labels": _goal_progress_labels(locale),
+            "goal_agent_message": (
+                "No LLM_API_KEY configured. Please set it in Settings  LLM Settings."
+                if locale == "en" else "暂未没有配置LLM_API_KEY. 请前往 Settings → LLM Settings进行配置"
+            ),
+            "goal_agent_title": "Goal Analysis Agent" if locale == "en" else "Goal 分析 Agent",
+            "goal_analyses": {goal.id: goal_analysis} if goal_analysis else {},
+            "goal_agent_notice": goal_agent_notice,
+        },
+    )
+
+
+@router.post("/suggestions/goal_analysis/regenerate", response_class=HTMLResponse)
+def regenerate_goal_analysis(
+    request: Request,
+    goal_id: int = Form(...),
+    as_of: Optional[str] = Form(None),
+    mode: str = Query("llm"),
+    lang: Optional[str] = Form(None),
+) -> Response:
+    session = _get_session(request)
+    executor = _get_executor(request)
+    locale = _get_locale(request)
+    goal = session.exec(select(Goal).where(Goal.id == goal_id)).first()
+    if not goal:
+        return Response(status_code=404)
+    date_value = _parse_date(as_of, _today())
+    suggestion = _goal_analysis_for_date(session, goal_id, date_value)
+    lang_value = (lang or locale).strip()
+    if lang_value not in {"zh", "en"}:
+        lang_value = locale
+    payload = {
+        "goal_id": goal_id,
+        "as_of": date_value,
+        "lang": lang_value,
+        "mode": "rules" if mode == "rules" else "llm",
+        "trigger": "manual_regenerate",
+    }
+    if suggestion:
+        payload["existing_id"] = suggestion.id
+    try:
+        executor.execute(session, "review.goal_analysis", payload)
+    except RuntimeError as exc:
+        suggestion = _goal_analysis_for_date(session, goal_id, date_value)
+        if suggestion:
+            card = _format_goal_analysis_card(suggestion)
+            card["notice"] = str(exc)
+            milestones = session.exec(select(Milestone).where(Milestone.goal_id == goal_id)).all()
+            return templates.TemplateResponse(
+                "partials/goal_card.html",
+                {
+                    "request": request,
+                    "goal": goal,
+                    "milestones": milestones,
+                    "goal_progress": {goal.id: _goal_progress_payload(goal, date_value)},
+                    "goal_progress_labels": _goal_progress_labels(locale),
+                    "goal_agent_message": (
+                        "No LLM_API_KEY configured. Please set it in Settings  LLM Settings."
+                        if locale == "en" else "暂未没有配置LLM_API_KEY. 请前往 Settings → LLM Settings进行配置"
+                    ),
+                    "goal_agent_title": "Goal Analysis Agent"
+                    if locale == "en"
+                    else "Goal 分析 Agent",
+                    "goal_analyses": {goal.id: card},
+                },
+            )
+        return templates.TemplateResponse(
+            "partials/error.html",
+            {"request": request, "message": str(exc), "retry": "/goals"},
+            status_code=400,
+        )
+    suggestion = _goal_analysis_for_date(session, goal_id, date_value)
+    if not suggestion:
+        return Response(status_code=404)
+    milestones = session.exec(select(Milestone).where(Milestone.goal_id == goal_id)).all()
+    goal_analysis = _format_goal_analysis_card(suggestion)
+    return templates.TemplateResponse(
+        "partials/goal_card.html",
+        {
+            "request": request,
+            "goal": goal,
+            "milestones": milestones,
+            "goal_progress": {goal.id: _goal_progress_payload(goal, date_value)},
+            "goal_progress_labels": _goal_progress_labels(locale),
+            "goal_agent_message": (
+                "No LLM_API_KEY configured. Please set it in Settings  LLM Settings."
+                if locale == "en" else "暂未没有配置LLM_API_KEY. 请前往 Settings → LLM Settings进行配置"
+            ),
+            "goal_agent_title": "Goal Analysis Agent" if locale == "en" else "Goal 分析 Agent",
+            "goal_analyses": {goal.id: goal_analysis},
+        },
     )
 
 
