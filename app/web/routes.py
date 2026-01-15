@@ -648,6 +648,21 @@ def _goal_analysis_for_date(
     return None
 
 
+def _latest_goal_analysis(session: Session, goal_id: int) -> Optional[Suggestion]:
+    candidates = session.exec(
+        select(Suggestion)
+        .where(Suggestion.type == "goal_analysis")
+        .order_by(Suggestion.created_at.desc())
+        .limit(200)
+    ).all()
+    for suggestion in candidates:
+        metrics = suggestion.metrics_json or {}
+        meta = metrics.get("metrics") or {}
+        if meta.get("goal_id") == goal_id:
+            return suggestion
+    return None
+
+
 def _format_goal_analysis_card(suggestion: Suggestion) -> Dict[str, Any]:
     metrics = suggestion.metrics_json or {}
     return {
@@ -935,8 +950,17 @@ def goals(request: Request) -> Response:
     llm_key_present = bool(env_key or (settings_row.llm_api_key if settings_row else ""))
     goal_progress = {goal.id: _goal_progress_payload(goal, today) for goal in goals_list}
     goal_analyses: Dict[int, Dict[str, Any]] = {}
+    goal_actual_progress: Dict[int, Optional[int]] = {}
     goal_agent_notice_by_id: Dict[int, str] = {}
     for goal in goals_list:
+        latest_suggestion = _latest_goal_analysis(session, goal.id)
+        latest_metrics = (latest_suggestion.metrics_json or {}).get("metrics") if latest_suggestion else {}
+        progress_pct = latest_metrics.get("progress_pct")
+        if isinstance(progress_pct, (int, float)):
+            progress_pct = max(0, min(int(round(progress_pct)), 100))
+        else:
+            progress_pct = None
+        goal_actual_progress[goal.id] = progress_pct
         suggestion = _goal_analysis_for_date(session, goal.id, today)
         if not suggestion:
             payload = {
@@ -993,6 +1017,7 @@ def goals(request: Request) -> Response:
             "goal_agent_message": agent_message,
             "goal_agent_title": agent_title,
             "goal_analyses": goal_analyses,
+            "goal_actual_progress": goal_actual_progress,
             "goal_agent_notice_by_id": goal_agent_notice_by_id,
         },
     )

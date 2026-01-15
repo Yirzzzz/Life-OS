@@ -37,7 +37,7 @@ class GoalAnalysisOutput(BaseModel):
     progress_summary: str
     highlights: List[Dict[str, Any]]
     risks: List[str] = ["暂无风险事件"]
-    next_steps: List[str]
+    next_steps: List[Dict[str, Any] | str]
     assumptions: List[str]
     ask_back: str
     notice: str
