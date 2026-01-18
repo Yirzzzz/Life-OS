@@ -382,10 +382,13 @@ def _build_prompt_node_c(node_a, node_b, progress_signals, lang) -> str:
 
 def _build_prompt_node_d(node_a, node_b, node_c, progress_signals, lang) -> str:
     schema = (
-        '{"progress_summary":str,"highlights":[{"text":str,"evidence_ids":[int]}],'
-        '"progress_gap":str,"remaining_work":[{"text":str,"priority":int,"evidence_ids":[int]}],'
-        '"next_steps":[{"text":str,"evidence_ids":[int]}],"to_improve":[str],"assumptions":[str],'
-        '"ask_back":str,"notice":str,'
+        '{"progress_summary":str,"highlights":[{"text":str,"evidence_ids":[int],"confidence":"High|Med|Low","needs_confirmation":bool}],'
+        '"progress_gap":{"text":str,"evidence_ids":[int],"confidence":"High|Med|Low","needs_confirmation":bool},'
+        '"remaining_work":[{"text":str,"priority":int,"evidence_ids":[int],"confidence":"High|Med|Low","needs_confirmation":bool}],'
+        '"next_steps":[{"text":str,"evidence_ids":[int],"confidence":"High|Med|Low","needs_confirmation":bool}],'
+        '"to_improve":[str],"assumptions":[str],"ask_back":str,"notice":str,'
+        '"trust_summary":{"coverage_rate":0.0,"overall_confidence":"High|Med|Low","low_confidence_claims_count":int,'
+        '"evidence_pool_size":int,"conflicts_detected":int,"broken_evidence_id_count":int},'
         '"metrics":{"coverage":0.0,"alignment":0.0,"confidence":0.0,'
         '"progress_pct":0.0,'
         '"window_start":str,"window_end":str,"generator_mode":"llm_progress_replan"}}'
@@ -532,15 +535,22 @@ def _validate_node_c(data: Dict[str, Any]) -> bool:
 
 
 def _validate_node_d(data: Dict[str, Any]) -> bool:
+    progress_gap = data.get("progress_gap")
+    progress_gap_ok = isinstance(progress_gap, str) or (
+        isinstance(progress_gap, dict) and isinstance(progress_gap.get("text"), str)
+    )
+    trust_summary = data.get("trust_summary")
+    trust_summary_ok = trust_summary is None or isinstance(trust_summary, dict)
     return bool(
         isinstance(data.get("progress_summary"), str)
         and isinstance(data.get("highlights"), list)
-        and isinstance(data.get("progress_gap"), str)
+        and progress_gap_ok
         and isinstance(data.get("remaining_work"), list)
         and isinstance(data.get("next_steps"), list)
         and isinstance(data.get("to_improve"), list)
         and isinstance(data.get("assumptions"), list)
         and isinstance(data.get("metrics"), dict)
+        and trust_summary_ok
     )
 
 
@@ -702,7 +712,12 @@ def _fallback_node_d(
     return {
         "progress_summary": summary,
         "highlights": highlights,
-        "progress_gap": "Evidence shows partial progress; most deliverables remain.",
+        "progress_gap": {
+            "text": "Evidence shows partial progress; most deliverables remain.",
+            "evidence_ids": [],
+            "confidence": "Low",
+            "needs_confirmation": True,
+        },
         "remaining_work": remaining_work[:5],
         "next_steps": next_steps,
         "to_improve": [],
@@ -719,6 +734,153 @@ def _fallback_node_d(
             "generator_mode": "llm_progress_replan",
         },
     }
+
+
+def _normalize_confidence(value: Any, has_evidence: bool) -> str:
+    if isinstance(value, (int, float)):
+        score = float(value)
+        if score >= 0.66:
+            return "High"
+        if score >= 0.33:
+            return "Med"
+        return "Low"
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"high", "h"}:
+            return "High"
+        if lowered in {"med", "medium", "m"}:
+            return "Med"
+        if lowered in {"low", "l"}:
+            return "Low"
+    return "Med" if has_evidence else "Low"
+
+
+def _normalize_claim_item(
+    item: Any, evidence_pool_ids: set[int]
+) -> tuple[Dict[str, Any], int, bool]:
+    if isinstance(item, dict):
+        text = str(item.get("text") or "")
+        evidence_ids_raw = item.get("evidence_ids")
+        if isinstance(evidence_ids_raw, list):
+            evidence_ids = []
+            for val in evidence_ids_raw:
+                if isinstance(val, int):
+                    evidence_ids.append(val)
+                elif isinstance(val, str) and val.isdigit():
+                    evidence_ids.append(int(val))
+        else:
+            evidence_ids = []
+        valid_ids = [eid for eid in evidence_ids if eid in evidence_pool_ids]
+        broken_count = len(evidence_ids) - len(valid_ids)
+        has_evidence = bool(valid_ids)
+        confidence = _normalize_confidence(item.get("confidence"), has_evidence)
+        needs_confirmation = bool(item.get("needs_confirmation")) or not has_evidence
+        if broken_count > 0:
+            confidence = "Low"
+            needs_confirmation = True
+        normalized = dict(item)
+        normalized["text"] = text
+        normalized["evidence_ids"] = valid_ids
+        normalized["confidence"] = confidence
+        normalized["needs_confirmation"] = needs_confirmation
+        return normalized, broken_count, has_evidence
+    text = str(item or "")
+    normalized = {
+        "text": text,
+        "evidence_ids": [],
+        "confidence": "Low",
+        "needs_confirmation": True,
+    }
+    return normalized, 0, False
+
+
+def _normalize_claim_list(
+    items: Iterable[Any], evidence_pool_ids: set[int]
+) -> tuple[List[Dict[str, Any]], int, int, int]:
+    normalized: List[Dict[str, Any]] = []
+    broken_total = 0
+    total_claims = 0
+    claims_with_evidence = 0
+    for item in items:
+        normalized_item, broken_count, has_evidence = _normalize_claim_item(
+            item, evidence_pool_ids
+        )
+        normalized.append(normalized_item)
+        broken_total += broken_count
+        total_claims += 1
+        if has_evidence:
+            claims_with_evidence += 1
+    return normalized, broken_total, total_claims, claims_with_evidence
+
+
+def _apply_trust_summary(
+    node_d: Dict[str, Any], node_a: Dict[str, Any]
+) -> Dict[str, Any]:
+    evidence_pool = node_a.get("evidence") or []
+    evidence_pool_ids: set[int] = set()
+    for item in evidence_pool:
+        raw_id = item.get("id")
+        if isinstance(raw_id, int):
+            evidence_pool_ids.add(raw_id)
+        elif isinstance(raw_id, str) and raw_id.isdigit():
+            evidence_pool_ids.add(int(raw_id))
+    highlights, broken_h, total_h, covered_h = _normalize_claim_list(
+        node_d.get("highlights") or [], evidence_pool_ids
+    )
+    next_steps, broken_n, total_n, covered_n = _normalize_claim_list(
+        node_d.get("next_steps") or [], evidence_pool_ids
+    )
+    remaining_work, broken_r, total_r, covered_r = _normalize_claim_list(
+        node_d.get("remaining_work") or [], evidence_pool_ids
+    )
+    progress_gap_raw = node_d.get("progress_gap")
+    progress_gap_claim = None
+    broken_g = 0
+    total_g = 0
+    covered_g = 0
+    if progress_gap_raw is not None:
+        if isinstance(progress_gap_raw, dict) or isinstance(progress_gap_raw, str):
+            progress_gap_claim, broken_g, total_g, covered_g = _normalize_claim_list(
+                [progress_gap_raw], evidence_pool_ids
+            )
+            progress_gap_claim = progress_gap_claim[0]
+    node_d["highlights"] = highlights
+    node_d["next_steps"] = next_steps
+    node_d["remaining_work"] = remaining_work
+    if progress_gap_claim:
+        node_d["progress_gap"] = progress_gap_claim
+
+    total_claims = total_h + total_n + total_r + total_g
+    covered_claims = covered_h + covered_n + covered_r + covered_g
+    coverage_rate = covered_claims / total_claims if total_claims else 0.0
+    low_confidence_claims_count = 0
+    for claim_list in (highlights, next_steps, remaining_work):
+        for item in claim_list:
+            if item.get("confidence") == "Low" or item.get("needs_confirmation"):
+                low_confidence_claims_count += 1
+    if progress_gap_claim and (
+        progress_gap_claim.get("confidence") == "Low"
+        or progress_gap_claim.get("needs_confirmation")
+    ):
+        low_confidence_claims_count += 1
+
+    broken_evidence_id_count = broken_h + broken_n + broken_r + broken_g
+    if coverage_rate >= 0.7 and low_confidence_claims_count == 0:
+        overall_confidence = "High"
+    elif coverage_rate >= 0.4 and low_confidence_claims_count <= max(1, total_claims // 3):
+        overall_confidence = "Med"
+    else:
+        overall_confidence = "Low"
+
+    node_d["trust_summary"] = {
+        "coverage_rate": coverage_rate,
+        "overall_confidence": overall_confidence,
+        "low_confidence_claims_count": low_confidence_claims_count,
+        "evidence_pool_size": len(evidence_pool),
+        "conflicts_detected": 0,
+        "broken_evidence_id_count": broken_evidence_id_count,
+    }
+    return node_d
 
 
 def _apply_gate(node_c: Dict[str, Any], node_a: Dict[str, Any]) -> None:
@@ -842,12 +1004,15 @@ def _node_d(
             if not assumptions:
                 assumptions = [node_c.get("replan_reason") or "Triggered re-plan based on evidence."]
             parsed["assumptions"] = assumptions
+        parsed = _apply_trust_summary(parsed, node_a)
         return parsed, {"mode": "llm"}
-    return _fallback_node_d(
+    fallback = _fallback_node_d(
         {"window": (node_a.get("coverage") or {}).get("window", {})},
         node_a,
         node_b,
         node_c,
         progress_signals,
         lang,
-    ), {"mode": "fallback", "error": error}
+    )
+    fallback = _apply_trust_summary(fallback, node_a)
+    return fallback, {"mode": "fallback", "error": error}

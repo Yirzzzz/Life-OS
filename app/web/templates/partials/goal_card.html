@@ -79,11 +79,110 @@
         <div class="mt-2 text-xs text-amber-600">{{ analysis.notice }}</div>
       {% endif %}
       <div class="mt-2 text-sm text-slate-700">{{ analysis.progress_summary }}</div>
+      {# ===== Trust Summary ===== #}
+      {% set trust_summary = analysis.trust_summary if analysis.trust_summary else {
+        "overall_confidence": "Low",
+        "coverage_rate": 0.0,
+        "low_confidence_claims_count": 0,
+        "evidence_pool_size": 0,
+        "conflicts_detected": 0,
+        "broken_evidence_id_count": 0
+      } %}
+      {% set overall_confidence = trust_summary.overall_confidence if trust_summary.overall_confidence else "Low" %}
+      {% if overall_confidence == "High" %}
+        {% set overall_badge_class = "bg-emerald-100 text-emerald-700" %}
+      {% elif overall_confidence == "Med" %}
+        {% set overall_badge_class = "bg-amber-100 text-amber-800" %}
+      {% else %}
+        {% set overall_badge_class = "bg-rose-100 text-rose-700" %}
+      {% endif %}
+      <div class="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-semibold text-slate-600">Confidence</span>
+            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {{ overall_badge_class }}">
+              {{ overall_confidence }}
+            </span>
+          </div>
+          <div class="flex flex-wrap gap-3 text-xs text-slate-500">
+            <span>Coverage {{ (trust_summary.coverage_rate * 100) | int }}%</span>
+            <span>Low claims {{ trust_summary.low_confidence_claims_count }}</span>
+            <span>Evidence {{ trust_summary.evidence_pool_size }}</span>
+            <span>Conflicts {{ trust_summary.conflicts_detected }}</span>
+          </div>
+        </div>
+        <div class="mt-2 h-1.5 w-full rounded-full bg-slate-200 overflow-hidden">
+          <div class="h-1.5 bg-slate-500" style="width: {{ (trust_summary.coverage_rate * 100) | int }}%"></div>
+        </div>
+      </div>
+      {# ===== Evidence Pool Map ===== #}
+      {% set evidence_pool = analysis.intent.evidence if analysis.intent and analysis.intent.evidence else [] %}
+      {% set evidence_map = namespace(items={}) %}
+      {% for ev in evidence_pool %}
+        {% if ev.id is not none %}
+          {% set _ = evidence_map.items.update({ev.id: ev}) %}
+        {% endif %}
+      {% endfor %}
       {% if analysis.highlights %}
         <div class="mt-3 text-xs text-slate-500">Highlights</div>
         <div class="mt-1 space-y-1">
           {% for item in analysis.highlights %}
-            <div class="text-sm text-slate-600">{{ item.text }}</div>
+            {% if item is mapping %}
+              {% set item_text = item.text %}
+              {% set item_confidence = item.confidence if item.confidence else "Low" %}
+              {% set needs_confirmation = item.needs_confirmation %}
+              {% set evidence_ids = item.evidence_ids if item.evidence_ids else [] %}
+            {% else %}
+              {% set item_text = item %}
+              {% set item_confidence = "Low" %}
+              {% set needs_confirmation = true %}
+              {% set evidence_ids = [] %}
+            {% endif %}
+            {% if item_confidence == "High" %}
+              {% set badge_class = "bg-emerald-100 text-emerald-700" %}
+            {% elif item_confidence == "Med" %}
+              {% set badge_class = "bg-amber-100 text-amber-800" %}
+            {% else %}
+              {% set badge_class = "bg-rose-100 text-rose-700" %}
+            {% endif %}
+            {% set evidence_items = namespace(items=[]) %}
+            {% for eid in evidence_ids %}
+              {% set ev = evidence_map.items.get(eid) %}
+              {% if ev %}
+                {% set _ = evidence_items.items.append(ev) %}
+              {% endif %}
+            {% endfor %}
+            <div class="text-sm text-slate-600 flex flex-wrap items-start gap-2">
+              <div class="flex-1">{{ item_text }}</div>
+              <div class="inline-flex items-center gap-1">
+                <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {{ badge_class }}">
+                  {{ item_confidence }}
+                </span>
+                {% if evidence_items.items|length > 0 %}
+                  <details class="text-xs text-slate-500">
+                    <summary class="cursor-pointer">Evidence ({{ evidence_items.items|length }})</summary>
+                    <div class="mt-2 space-y-2">
+                      {% for ev in evidence_items.items %}
+                        <div class="rounded border border-slate-200 bg-white p-2 shadow-sm">
+                          <div class="text-slate-700">{{ ev.quote }}</div>
+                          <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                            <span>{{ ev.source_type }} · {{ ev.date }}</span>
+                            {% if ev.url %}
+                              <a class="underline" href="{{ ev.url }}">Open</a>
+                            {% endif %}
+                          </div>
+                        </div>
+                      {% endfor %}
+                    </div>
+                  </details>
+                {% else %}
+                  <span class="text-xs text-slate-400">Evidence (0)</span>
+                {% endif %}
+                {% if needs_confirmation or evidence_items.items|length == 0 %}
+                  <span class="text-xs text-slate-400">Needs confirmation / 缺少记录</span>
+                {% endif %}
+              </div>
+            </div>
           {% endfor %}
         </div>
       {% endif %}
@@ -119,7 +218,62 @@
         <div class="mt-3 text-xs text-slate-500">Next steps</div>
         <div class="mt-1 space-y-1">
           {% for item in analysis.next_steps %}
-            <div class="text-sm text-slate-600">{{ item.text if item is mapping else item }}</div>
+            {% if item is mapping %}
+              {% set item_text = item.text %}
+              {% set item_confidence = item.confidence if item.confidence else "Low" %}
+              {% set needs_confirmation = item.needs_confirmation %}
+              {% set evidence_ids = item.evidence_ids if item.evidence_ids else [] %}
+            {% else %}
+              {% set item_text = item %}
+              {% set item_confidence = "Low" %}
+              {% set needs_confirmation = true %}
+              {% set evidence_ids = [] %}
+            {% endif %}
+            {% if item_confidence == "High" %}
+              {% set badge_class = "bg-emerald-100 text-emerald-700" %}
+            {% elif item_confidence == "Med" %}
+              {% set badge_class = "bg-amber-100 text-amber-800" %}
+            {% else %}
+              {% set badge_class = "bg-rose-100 text-rose-700" %}
+            {% endif %}
+            {% set evidence_items = namespace(items=[]) %}
+            {% for eid in evidence_ids %}
+              {% set ev = evidence_map.items.get(eid) %}
+              {% if ev %}
+                {% set _ = evidence_items.items.append(ev) %}
+              {% endif %}
+            {% endfor %}
+            <div class="text-sm text-slate-600 flex flex-wrap items-start gap-2">
+              <div class="flex-1">{{ item_text }}</div>
+              <div class="inline-flex items-center gap-1">
+                <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {{ badge_class }}">
+                  {{ item_confidence }}
+                </span>
+                {% if evidence_items.items|length > 0 %}
+                  <details class="text-xs text-slate-500">
+                    <summary class="cursor-pointer">Evidence ({{ evidence_items.items|length }})</summary>
+                    <div class="mt-2 space-y-2">
+                      {% for ev in evidence_items.items %}
+                        <div class="rounded border border-slate-200 bg-white p-2 shadow-sm">
+                          <div class="text-slate-700">{{ ev.quote }}</div>
+                          <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                            <span>{{ ev.source_type }} · {{ ev.date }}</span>
+                            {% if ev.url %}
+                              <a class="underline" href="{{ ev.url }}">Open</a>
+                            {% endif %}
+                          </div>
+                        </div>
+                      {% endfor %}
+                    </div>
+                  </details>
+                {% else %}
+                  <span class="text-xs text-slate-400">Evidence (0)</span>
+                {% endif %}
+                {% if needs_confirmation or evidence_items.items|length == 0 %}
+                  <span class="text-xs text-slate-400">Needs confirmation / 缺少记录</span>
+                {% endif %}
+              </div>
+            </div>
           {% endfor %}
         </div>
       {% endif %}
