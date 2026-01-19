@@ -79,42 +79,37 @@
         <div class="mt-2 text-xs text-amber-600">{{ analysis.notice }}</div>
       {% endif %}
       <div class="mt-2 text-sm text-slate-700">{{ analysis.progress_summary }}</div>
-      {# ===== Trust Summary ===== #}
-      {% set trust_summary = analysis.trust_summary if analysis.trust_summary else {
-        "overall_confidence": "Low",
-        "coverage_rate": 0.0,
-        "low_confidence_claims_count": 0,
-        "evidence_pool_size": 0,
-        "conflicts_detected": 0,
-        "broken_evidence_id_count": 0
-      } %}
-      {% set overall_confidence = trust_summary.overall_confidence if trust_summary.overall_confidence else "Low" %}
-      {% if overall_confidence == "High" %}
-        {% set overall_badge_class = "bg-emerald-100 text-emerald-700" %}
-      {% elif overall_confidence == "Med" %}
-        {% set overall_badge_class = "bg-amber-100 text-amber-800" %}
-      {% else %}
-        {% set overall_badge_class = "bg-rose-100 text-rose-700" %}
+      {# ===== Trust Summary (optional) ===== #}
+      {% if analysis.trust_summary %}
+        {% set trust_summary = analysis.trust_summary %}
+        {% set overall_confidence = trust_summary.overall_confidence if trust_summary.overall_confidence else "Low" %}
+        {% if overall_confidence == "High" %}
+          {% set overall_badge_class = "bg-emerald-100 text-emerald-700" %}
+        {% elif overall_confidence == "Med" %}
+          {% set overall_badge_class = "bg-amber-100 text-amber-800" %}
+        {% else %}
+          {% set overall_badge_class = "bg-rose-100 text-rose-700" %}
+        {% endif %}
+        <div class="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-semibold text-slate-600">Confidence</span>
+              <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {{ overall_badge_class }}">
+                {{ overall_confidence }}
+              </span>
+            </div>
+            <div class="flex flex-wrap gap-3 text-xs text-slate-500">
+              <span>Coverage {{ (trust_summary.coverage_rate * 100) | int }}%</span>
+              <span>Low claims {{ trust_summary.low_confidence_claims_count }}</span>
+              <span>Evidence {{ trust_summary.evidence_pool_size }}</span>
+              <span>Conflicts {{ trust_summary.conflicts_detected }}</span>
+            </div>
+          </div>
+          <div class="mt-2 h-1.5 w-full rounded-full bg-slate-200 overflow-hidden">
+            <div class="h-1.5 bg-slate-500" style="width: {{ (trust_summary.coverage_rate * 100) | int }}%"></div>
+          </div>
+        </div>
       {% endif %}
-      <div class="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3">
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <div class="flex items-center gap-2">
-            <span class="text-xs font-semibold text-slate-600">Confidence</span>
-            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {{ overall_badge_class }}">
-              {{ overall_confidence }}
-            </span>
-          </div>
-          <div class="flex flex-wrap gap-3 text-xs text-slate-500">
-            <span>Coverage {{ (trust_summary.coverage_rate * 100) | int }}%</span>
-            <span>Low claims {{ trust_summary.low_confidence_claims_count }}</span>
-            <span>Evidence {{ trust_summary.evidence_pool_size }}</span>
-            <span>Conflicts {{ trust_summary.conflicts_detected }}</span>
-          </div>
-        </div>
-        <div class="mt-2 h-1.5 w-full rounded-full bg-slate-200 overflow-hidden">
-          <div class="h-1.5 bg-slate-500" style="width: {{ (trust_summary.coverage_rate * 100) | int }}%"></div>
-        </div>
-      </div>
       {# ===== Evidence Pool Map ===== #}
       {% set evidence_pool = analysis.intent.evidence if analysis.intent and analysis.intent.evidence else [] %}
       {% set evidence_map = namespace(items={}) %}
@@ -123,6 +118,66 @@
           {% set _ = evidence_map.items.update({ev.id: ev}) %}
         {% endif %}
       {% endfor %}
+
+      {# ===== Replan Summary ===== #}
+      {% set replan = analysis.replan if analysis.replan else {} %}
+      {% set show_replan = replan.needed or replan.summary or replan.why %}
+      {% if show_replan %}
+        {% set replan_confidence = replan.confidence if replan.confidence else "Low" %}
+        {% if replan_confidence == "High" %}
+          {% set replan_badge_class = "bg-emerald-100 text-emerald-700" %}
+        {% elif replan_confidence == "Med" %}
+          {% set replan_badge_class = "bg-amber-100 text-amber-800" %}
+        {% else %}
+          {% set replan_badge_class = "bg-rose-100 text-rose-700" %}
+        {% endif %}
+        {% set replan_evidence_ids = replan.evidence_ids if replan.evidence_ids else [] %}
+        {% set replan_evidence = namespace(items=[]) %}
+        {% for eid in replan_evidence_ids %}
+          {% set ev = evidence_map.items.get(eid) %}
+          {% if ev %}
+            {% set _ = replan_evidence.items.append(ev) %}
+          {% endif %}
+        {% endfor %}
+        <div class="mt-3 rounded border border-slate-200 bg-white p-3">
+          <div class="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <div class="text-xs font-semibold text-slate-600">Replan Summary</div>
+              {% if replan.summary %}
+                <div class="mt-1 text-sm text-slate-700">{{ replan.summary }}</div>
+              {% endif %}
+              {% if replan.why %}
+                <div class="mt-2 text-xs text-slate-500">Why: {{ replan.why }}</div>
+              {% endif %}
+            </div>
+            <div class="inline-flex items-center gap-1">
+              <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {{ replan_badge_class }}">
+                {{ replan_confidence }}
+              </span>
+              {% if replan_evidence.items|length > 0 %}
+                <details class="text-xs text-slate-500">
+                  <summary class="cursor-pointer">Evidence ({{ replan_evidence.items|length }})</summary>
+                  <div class="mt-2 space-y-2">
+                    {% for ev in replan_evidence.items %}
+                      <div class="rounded border border-slate-200 bg-white p-2 shadow-sm">
+                        <div class="text-slate-700">{{ ev.quote }}</div>
+                        <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                          <span>{{ ev.source_type }} · {{ ev.date }}</span>
+                          {% if ev.url %}
+                            <a class="underline" href="{{ ev.url }}">Open</a>
+                          {% endif %}
+                        </div>
+                      </div>
+                    {% endfor %}
+                  </div>
+                </details>
+              {% else %}
+                <span class="text-xs text-slate-400">Evidence (0)</span>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      {% endif %}
       {% if analysis.highlights %}
         <div class="mt-3 text-xs text-slate-500">Highlights</div>
         <div class="mt-1 space-y-1">
@@ -186,34 +241,6 @@
           {% endfor %}
         </div>
       {% endif %}
-      {% set matched = analysis.evidence.matched_evidence if analysis.evidence else [] %}
-      {% set quotes = analysis.intent.evidence_quotes if analysis.intent else [] %}
-      {% if matched or quotes %}
-        <div class="mt-3 text-xs text-slate-500">Evidence</div>
-        <div class="mt-1 space-y-1">
-          {% if matched %}
-            {% for item in matched %}
-              <div class="text-sm text-slate-600">
-                <a class="underline" href="{{ item.link }}">{{ item.quote }}</a>
-              </div>
-            {% endfor %}
-          {% else %}
-            {% for item in quotes %}
-              <div class="text-sm text-slate-600">
-                <a class="underline" href="{{ item.link }}">{{ item.quote }}</a>
-              </div>
-            {% endfor %}
-          {% endif %}
-        </div>
-      {% endif %}
-      {% if analysis.risks %}
-        <div class="mt-3 text-xs text-slate-500">Risks</div>
-        <div class="mt-1 space-y-1">
-          {% for item in analysis.risks %}
-            <div class="text-sm text-slate-600">{{ item }}</div>
-          {% endfor %}
-        </div>
-      {% endif %}
       {% if analysis.next_steps %}
         <div class="mt-3 text-xs text-slate-500">Next steps</div>
         <div class="mt-1 space-y-1">
@@ -244,7 +271,14 @@
               {% endif %}
             {% endfor %}
             <div class="text-sm text-slate-600 flex flex-wrap items-start gap-2">
-              <div class="flex-1">{{ item_text }}</div>
+              <div class="flex-1">
+                <div>{{ item_text }}</div>
+                {% if item is mapping and item.reason %}
+                  <div class="mt-1 text-xs text-slate-400">{{ item.reason }}</div>
+                {% elif item is mapping %}
+                  <div class="mt-1 text-xs text-slate-400">Reason: Pending confirmation</div>
+                {% endif %}
+              </div>
               <div class="inline-flex items-center gap-1">
                 <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {{ badge_class }}">
                   {{ item_confidence }}
@@ -276,18 +310,6 @@
             </div>
           {% endfor %}
         </div>
-      {% endif %}
-      {% if analysis.assumptions %}
-        <div class="mt-3 text-xs text-slate-500">Assumptions</div>
-        <div class="mt-1 space-y-1">
-          {% for item in analysis.assumptions %}
-            <div class="text-sm text-slate-600">{{ item }}</div>
-          {% endfor %}
-        </div>
-      {% endif %}
-      {% if analysis.ask_back %}
-        <div class="mt-3 text-xs text-slate-500">Ask back</div>
-        <div class="mt-1 text-sm text-slate-600">{{ analysis.ask_back }}</div>
       {% endif %}
       {% if analysis.metrics %}
         <div class="mt-3 text-xs text-slate-400">

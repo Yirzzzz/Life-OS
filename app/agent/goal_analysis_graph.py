@@ -325,6 +325,7 @@ def _build_prompt_node_c(node_a, node_b, progress_signals, lang) -> str:
     schema = (
         '{"verdict":"too_big|aligned|too_small|unclear","reason":str,"evidence_ids":[int],'
         '"replan_needed":bool,"replan_reason":str,"replan_instructions":[str],'
+        '"replan_rationale_summary":str,"replan_evidence_ids":[int],'
         '"max_next_steps":int,"confidence":0.0,"alignment":0.0}'
     )
     if lang == "en":
@@ -336,6 +337,7 @@ def _build_prompt_node_c(node_a, node_b, progress_signals, lang) -> str:
             "- Output JSON only.\n"
             "- reason MUST reference evidence_ids from node_a.evidence.\n"
             "- If replan_needed=true, replan_instructions MUST be non-empty (2–4 items) and actionable.\n"
+            "- If replan_needed=true, replan_rationale_summary MUST be a concise, user-facing why summary.\n"
             "- replan_instructions MUST explicitly prevent the same failure (e.g., reduce phases, limit deliverables per phase, focus on one core deliverable).\n"
             "\n"
             "HOW TO JUDGE:\n"
@@ -361,6 +363,7 @@ def _build_prompt_node_c(node_a, node_b, progress_signals, lang) -> str:
         "- 只输出 JSON。\n"
         "- reason 必须引用 node_a.evidence 的 evidence_ids（不能空口判断）。\n"
         "- 若 replan_needed=true：replan_instructions 必须非空（2–4条），且必须具体可执行。\n"
+        "- 若 replan_needed=true：replan_rationale_summary 必须给出一句面向用户的“为什么要重计划”的摘要。\n"
         "- replan_instructions 必须能避免同类问题再次出现（例如：减少阶段数、限制每阶段交付物数量、优先一个核心交付物、明确验收标准）。\n"
         "\n"
         "判断口径：\n"
@@ -385,7 +388,8 @@ def _build_prompt_node_d(node_a, node_b, node_c, progress_signals, lang) -> str:
         '{"progress_summary":str,"highlights":[{"text":str,"evidence_ids":[int],"confidence":"High|Med|Low","needs_confirmation":bool}],'
         '"progress_gap":{"text":str,"evidence_ids":[int],"confidence":"High|Med|Low","needs_confirmation":bool},'
         '"remaining_work":[{"text":str,"priority":int,"evidence_ids":[int],"confidence":"High|Med|Low","needs_confirmation":bool}],'
-        '"next_steps":[{"text":str,"evidence_ids":[int],"confidence":"High|Med|Low","needs_confirmation":bool}],'
+        '"next_steps":[{"text":str,"reason":str,"evidence_ids":[int],"confidence":"High|Med|Low","needs_confirmation":bool}],'
+        '"replan":{"needed":bool,"summary":str,"why":str,"confidence":"High|Med|Low","evidence_ids":[int]},'
         '"to_improve":[str],"assumptions":[str],"ask_back":str,"notice":str,'
         '"trust_summary":{"coverage_rate":0.0,"overall_confidence":"High|Med|Low","low_confidence_claims_count":int,'
         '"evidence_pool_size":int,"conflicts_detected":int,"broken_evidence_id_count":int},'
@@ -435,6 +439,13 @@ def _build_prompt_node_d(node_a, node_b, node_c, progress_signals, lang) -> str:
             "NEXT_STEPS:\n"
             "- Concrete actions for the next 7 days.\n"
             "- At most node_c.max_next_steps items.\n"
+            "- Each item MUST include a short reason (non-empty).\n"
+            "- Reason must reference either replan rationale/constraints or highlights; avoid empty filler.\n"
+            "\n"
+            "REPLAN:\n"
+            "- If node_c.replan_needed=true, output replan with summary/why/confidence/evidence_ids.\n"
+            "- replan.summary should include intent + timebox + deliverables.\n"
+            "- replan.why should be a one-line reason grounded in node_c.\n"
             "- Wrap feature/function nouns with 『』 when relevant.\n"
             "\n"
             "METRICS:\n"
@@ -490,6 +501,13 @@ def _build_prompt_node_d(node_a, node_b, node_c, progress_signals, lang) -> str:
         "next_steps：\n"
         "- 面向未来 7 天的具体动作。\n"
         "- 最多 node_c.max_next_steps 条。\n"
+        "- 每条必须包含 reason（不为空）。\n"
+        "- reason 必须引用 replan 的依赖/约束/缺口，或引用 highlights（至少一种）。\n"
+        "\n"
+        "REPLAN：\n"
+        "- 若 node_c.replan_needed=true，必须输出 replan（summary/why/confidence/evidence_ids）。\n"
+        "- replan.summary 需包含意图 + 时间盒 + 交付物。\n"
+        "- replan.why 为一句话，需与 node_c 决策一致。\n"
         "- 功能/模块名词尽量用『』包起来。\n"
         "\n"
         "metrics：\n"
@@ -530,6 +548,8 @@ def _validate_node_c(data: Dict[str, Any]) -> bool:
         and isinstance(data.get("replan_needed"), bool)
         and isinstance(data.get("replan_reason"), str)
         and isinstance(data.get("replan_instructions"), list)
+        and isinstance(data.get("replan_rationale_summary"), str)
+        and isinstance(data.get("replan_evidence_ids"), list)
         and isinstance(data.get("max_next_steps"), int)
     )
 
@@ -541,6 +561,8 @@ def _validate_node_d(data: Dict[str, Any]) -> bool:
     )
     trust_summary = data.get("trust_summary")
     trust_summary_ok = trust_summary is None or isinstance(trust_summary, dict)
+    replan = data.get("replan")
+    replan_ok = replan is None or isinstance(replan, dict)
     return bool(
         isinstance(data.get("progress_summary"), str)
         and isinstance(data.get("highlights"), list)
@@ -551,6 +573,7 @@ def _validate_node_d(data: Dict[str, Any]) -> bool:
         and isinstance(data.get("assumptions"), list)
         and isinstance(data.get("metrics"), dict)
         and trust_summary_ok
+        and replan_ok
     )
 
 
@@ -662,6 +685,8 @@ def _fallback_node_c(node_a: Dict[str, Any], node_b: Dict[str, Any]) -> Dict[str
         "replan_needed": False,
         "replan_reason": "Evidence is limited; keep scope small.",
         "replan_instructions": [],
+        "replan_rationale_summary": "",
+        "replan_evidence_ids": [],
         "max_next_steps": 1,
         "confidence": 0.4,
         "alignment": 0.3,
@@ -682,10 +707,22 @@ def _fallback_node_d(
     alignment = float(node_c.get("alignment") or 0.0)
     if lang == "en":
         summary = "Recent activity suggests small but real progress."
-        next_steps = [{"text": "Pick one smallest task you can finish today.", "evidence_ids": []}]
+        next_steps = [
+            {
+                "text": "Pick one smallest task you can finish today.",
+                "reason": "Keep the scope tight and create a quick win.",
+                "evidence_ids": [],
+            }
+        ]
     else:
         summary = "近期行动显示已有小幅推进。"
-        next_steps = [{"text": "选一个今天就能完成的小任务。", "evidence_ids": []}]
+        next_steps = [
+            {
+                "text": "选一个今天就能完成的小任务。",
+                "reason": "先做最小可完成任务，建立推进节奏。",
+                "evidence_ids": [],
+            }
+        ]
     max_steps = int(node_c.get("max_next_steps") or 1)
     next_steps = next_steps[:max_steps]
     highlights = []
@@ -760,6 +797,7 @@ def _normalize_claim_item(
 ) -> tuple[Dict[str, Any], int, bool]:
     if isinstance(item, dict):
         text = str(item.get("text") or "")
+        reason = str(item.get("reason") or "")
         evidence_ids_raw = item.get("evidence_ids")
         if isinstance(evidence_ids_raw, list):
             evidence_ids = []
@@ -780,6 +818,8 @@ def _normalize_claim_item(
             needs_confirmation = True
         normalized = dict(item)
         normalized["text"] = text
+        if "reason" in item:
+            normalized["reason"] = reason
         normalized["evidence_ids"] = valid_ids
         normalized["confidence"] = confidence
         normalized["needs_confirmation"] = needs_confirmation
@@ -796,11 +836,12 @@ def _normalize_claim_item(
 
 def _normalize_claim_list(
     items: Iterable[Any], evidence_pool_ids: set[int]
-) -> tuple[List[Dict[str, Any]], int, int, int]:
+) -> tuple[List[Dict[str, Any]], int, int, int, int]:
     normalized: List[Dict[str, Any]] = []
     broken_total = 0
     total_claims = 0
     claims_with_evidence = 0
+    claims_needing_confirmation = 0
     for item in items:
         normalized_item, broken_count, has_evidence = _normalize_claim_item(
             item, evidence_pool_ids
@@ -810,11 +851,125 @@ def _normalize_claim_list(
         total_claims += 1
         if has_evidence:
             claims_with_evidence += 1
-    return normalized, broken_total, total_claims, claims_with_evidence
+        if normalized_item.get("needs_confirmation"):
+            claims_needing_confirmation += 1
+    return (
+        normalized,
+        broken_total,
+        total_claims,
+        claims_with_evidence,
+        claims_needing_confirmation,
+    )
+
+
+def _build_replan_summary(
+    node_b: Dict[str, Any], progress_signals: Dict[str, Any], lang: str
+) -> str:
+    plan_outline = node_b.get("plan_outline") or []
+    deliverables: List[str] = []
+    for phase in plan_outline:
+        for deliverable in phase.get("deliverables", []) or []:
+            if deliverable:
+                deliverables.append(str(deliverable))
+    deliverables = deliverables[:3]
+    window_days = int(progress_signals.get("window_days") or 7)
+    if lang == "en":
+        if deliverables:
+            return (
+                f"Focus the next {window_days} days on {len(deliverables)} deliverables: "
+                + ", ".join(deliverables)
+                + "."
+            )
+        return f"Focus the next {window_days} days on one core, shippable outcome."
+    if deliverables:
+        return f"未来 {window_days} 天聚焦 {len(deliverables)} 个交付物：{', '.join(deliverables)}。"
+    return f"未来 {window_days} 天聚焦一个核心可交付成果。"
+
+
+def _normalize_replan(
+    node_d: Dict[str, Any],
+    node_b: Dict[str, Any],
+    node_c: Dict[str, Any],
+    progress_signals: Dict[str, Any],
+    evidence_pool_ids: set[int],
+    lang: str,
+) -> tuple[Dict[str, Any], int]:
+    replan = node_d.get("replan")
+    if not isinstance(replan, dict):
+        replan = {}
+    needed = bool(replan.get("needed") or node_c.get("replan_needed"))
+    summary = str(replan.get("summary") or "").strip()
+    why = str(replan.get("why") or "").strip()
+    confidence = _normalize_confidence(replan.get("confidence"), False)
+    evidence_ids_raw = replan.get("evidence_ids")
+    if isinstance(evidence_ids_raw, list):
+        evidence_ids = []
+        for val in evidence_ids_raw:
+            if isinstance(val, int):
+                evidence_ids.append(val)
+            elif isinstance(val, str) and val.isdigit():
+                evidence_ids.append(int(val))
+    else:
+        evidence_ids = []
+    if not evidence_ids and isinstance(node_c.get("replan_evidence_ids"), list):
+        for val in node_c.get("replan_evidence_ids"):
+            if isinstance(val, int):
+                evidence_ids.append(val)
+            elif isinstance(val, str) and val.isdigit():
+                evidence_ids.append(int(val))
+    valid_ids = [eid for eid in evidence_ids if eid in evidence_pool_ids]
+    broken_count = len(evidence_ids) - len(valid_ids)
+    if broken_count > 0:
+        confidence = "Low"
+    if needed and not summary:
+        summary = _build_replan_summary(node_b, progress_signals, lang)
+    if needed and not why:
+        why = (
+            str(node_c.get("replan_rationale_summary") or "").strip()
+            or str(node_c.get("replan_reason") or "").strip()
+            or str(node_c.get("reason") or "").strip()
+        )
+    if not confidence:
+        confidence = "Med" if valid_ids else "Low"
+    node_d["replan"] = {
+        "needed": needed,
+        "summary": summary,
+        "why": why,
+        "confidence": confidence,
+        "evidence_ids": valid_ids,
+    }
+    return node_d["replan"], broken_count
+
+
+def _ensure_next_step_reasons(
+    node_d: Dict[str, Any], node_c: Dict[str, Any], lang: str
+) -> None:
+    reason = (
+        str(node_c.get("replan_rationale_summary") or "").strip()
+        or str(node_c.get("replan_reason") or "").strip()
+        or str(node_c.get("reason") or "").strip()
+    )
+    if not reason:
+        reason = (
+            "Based on recent highlights, take the next concrete step."
+            if lang == "en"
+            else "基于近期亮点，推进下一步具体动作。"
+        )
+    next_steps = node_d.get("next_steps") or []
+    for item in next_steps:
+        if isinstance(item, dict):
+            item_reason = str(item.get("reason") or "").strip()
+            if not item_reason:
+                item["reason"] = reason
 
 
 def _apply_trust_summary(
-    node_d: Dict[str, Any], node_a: Dict[str, Any]
+    node_d: Dict[str, Any],
+    node_a: Dict[str, Any],
+    node_b: Dict[str, Any],
+    node_c: Dict[str, Any],
+    progress_signals: Dict[str, Any],
+    lang: str,
 ) -> Dict[str, Any]:
     evidence_pool = node_a.get("evidence") or []
     evidence_pool_ids: set[int] = set()
@@ -824,13 +979,13 @@ def _apply_trust_summary(
             evidence_pool_ids.add(raw_id)
         elif isinstance(raw_id, str) and raw_id.isdigit():
             evidence_pool_ids.add(int(raw_id))
-    highlights, broken_h, total_h, covered_h = _normalize_claim_list(
+    highlights, broken_h, total_h, covered_h, needs_h = _normalize_claim_list(
         node_d.get("highlights") or [], evidence_pool_ids
     )
-    next_steps, broken_n, total_n, covered_n = _normalize_claim_list(
+    next_steps, broken_n, total_n, covered_n, needs_n = _normalize_claim_list(
         node_d.get("next_steps") or [], evidence_pool_ids
     )
-    remaining_work, broken_r, total_r, covered_r = _normalize_claim_list(
+    remaining_work, broken_r, total_r, covered_r, needs_r = _normalize_claim_list(
         node_d.get("remaining_work") or [], evidence_pool_ids
     )
     progress_gap_raw = node_d.get("progress_gap")
@@ -838,9 +993,10 @@ def _apply_trust_summary(
     broken_g = 0
     total_g = 0
     covered_g = 0
+    needs_g = 0
     if progress_gap_raw is not None:
         if isinstance(progress_gap_raw, dict) or isinstance(progress_gap_raw, str):
-            progress_gap_claim, broken_g, total_g, covered_g = _normalize_claim_list(
+            progress_gap_claim, broken_g, total_g, covered_g, needs_g = _normalize_claim_list(
                 [progress_gap_raw], evidence_pool_ids
             )
             progress_gap_claim = progress_gap_claim[0]
@@ -853,18 +1009,15 @@ def _apply_trust_summary(
     total_claims = total_h + total_n + total_r + total_g
     covered_claims = covered_h + covered_n + covered_r + covered_g
     coverage_rate = covered_claims / total_claims if total_claims else 0.0
-    low_confidence_claims_count = 0
-    for claim_list in (highlights, next_steps, remaining_work):
-        for item in claim_list:
-            if item.get("confidence") == "Low" or item.get("needs_confirmation"):
-                low_confidence_claims_count += 1
-    if progress_gap_claim and (
-        progress_gap_claim.get("confidence") == "Low"
-        or progress_gap_claim.get("needs_confirmation")
-    ):
-        low_confidence_claims_count += 1
+    low_confidence_claims_count = needs_h + needs_n + needs_r
+    if progress_gap_claim:
+        if progress_gap_claim.get("needs_confirmation"):
+            low_confidence_claims_count += 1
 
-    broken_evidence_id_count = broken_h + broken_n + broken_r + broken_g
+    replan, broken_replan = _normalize_replan(
+        node_d, node_b, node_c, progress_signals, evidence_pool_ids, lang
+    )
+    broken_evidence_id_count = broken_h + broken_n + broken_r + broken_g + broken_replan
     if coverage_rate >= 0.7 and low_confidence_claims_count == 0:
         overall_confidence = "High"
     elif coverage_rate >= 0.4 and low_confidence_claims_count <= max(1, total_claims // 3):
@@ -970,7 +1123,7 @@ def _node_d(
         summary = parsed.get("progress_summary") or ""
         if not summary.startswith(greeting):
             parsed["progress_summary"] = f"{greeting}{summary}".strip()
-        max_steps = int(node_c.get("max_next_steps") or 3)
+        max_steps = min(5, max(3, int(node_c.get("max_next_steps") or 3)))
         raw_steps = parsed.get("next_steps") or []
         normalized_steps = []
         for item in raw_steps:
@@ -980,10 +1133,28 @@ def _node_d(
                     evidence_ids = item.get("evidence_ids")
                     if not isinstance(evidence_ids, list):
                         evidence_ids = []
-                    normalized_steps.append({"text": str(text), "evidence_ids": evidence_ids})
+                    reason = item.get("reason") or ""
+                    normalized_steps.append(
+                        {
+                            "text": str(text),
+                            "reason": str(reason),
+                            "evidence_ids": evidence_ids,
+                            "confidence": item.get("confidence"),
+                            "needs_confirmation": item.get("needs_confirmation"),
+                        }
+                    )
             elif item is not None:
-                normalized_steps.append({"text": str(item), "evidence_ids": []})
+                normalized_steps.append(
+                    {
+                        "text": str(item),
+                        "reason": "",
+                        "evidence_ids": [],
+                        "confidence": "Low",
+                        "needs_confirmation": True,
+                    }
+                )
         parsed["next_steps"] = normalized_steps[:max_steps]
+        _ensure_next_step_reasons(parsed, node_c, lang)
         remaining_work = parsed.get("remaining_work") or []
         while len(remaining_work) < 5:
             remaining_work.append(
@@ -1004,7 +1175,7 @@ def _node_d(
             if not assumptions:
                 assumptions = [node_c.get("replan_reason") or "Triggered re-plan based on evidence."]
             parsed["assumptions"] = assumptions
-        parsed = _apply_trust_summary(parsed, node_a)
+        parsed = _apply_trust_summary(parsed, node_a, node_b, node_c, progress_signals, lang)
         return parsed, {"mode": "llm"}
     fallback = _fallback_node_d(
         {"window": (node_a.get("coverage") or {}).get("window", {})},
@@ -1014,5 +1185,5 @@ def _node_d(
         progress_signals,
         lang,
     )
-    fallback = _apply_trust_summary(fallback, node_a)
+    fallback = _apply_trust_summary(fallback, node_a, node_b, node_c, progress_signals, lang)
     return fallback, {"mode": "fallback", "error": error}
