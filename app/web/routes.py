@@ -677,6 +677,7 @@ def _format_goal_analysis_card(suggestion: Suggestion) -> Dict[str, Any]:
         "notice": metrics.get("notice") or "",
         "trust_summary": metrics.get("trust_summary") or {},
         "replan": metrics.get("replan") or {},
+        "plan": metrics.get("plan") or {},
         "metrics": metrics,
         "intent": metrics.get("intent") or {},
         "evidence": metrics.get("evidence") or {},
