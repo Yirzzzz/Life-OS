@@ -325,11 +325,13 @@
               {% set item_confidence = item.confidence if item.confidence else "Low" %}
               {% set needs_confirmation = item.needs_confirmation %}
               {% set evidence_ids = item.evidence_ids if item.evidence_ids else [] %}
+              {% set step_key = item.step_key if item.step_key else "" %}
             {% else %}
               {% set item_text = item %}
               {% set item_confidence = "Low" %}
               {% set needs_confirmation = true %}
               {% set evidence_ids = [] %}
+              {% set step_key = "" %}
             {% endif %}
             {% if item_confidence == "High" %}
               {% set badge_class = "bg-emerald-100 text-emerald-700" %}
@@ -345,7 +347,13 @@
                 {% set _ = evidence_items.items.append(ev) %}
               {% endif %}
             {% endfor %}
-            <div class="rounded border border-slate-200 bg-white p-2">
+            <div
+              class="next-step-item rounded border border-slate-200 bg-white p-2"
+              data-goal-id="{{ goal.id }}"
+              data-suggestion-id="{{ analysis.id }}"
+              data-step-key="{{ step_key }}"
+              data-step-text="{{ item_text }}"
+            >
               <div class="text-sm font-medium text-slate-700">{{ item_text }}</div>
               {% if item is mapping and item.reason %}
                 <div class="mt-1 text-xs text-slate-400">{{ item.reason }}</div>
@@ -379,11 +387,217 @@
                 {% if needs_confirmation or evidence_items.items|length == 0 %}
                   <span class="text-xs text-slate-400">Needs confirmation / 缺少记录</span>
                 {% endif %}
+                <span class="next-step-status text-xs text-slate-400"></span>
+              </div>
+              <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                <button
+                  type="button"
+                  class="next-step-action px-2 py-1 border rounded border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                  data-action="accepted"
+                  {% if not step_key %}disabled{% endif %}
+                >
+                  Add to plan
+                </button>
+                <button
+                  type="button"
+                  class="next-step-action px-2 py-1 border rounded border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
+                  data-action="completed"
+                  {% if not step_key %}disabled{% endif %}
+                >
+                  Completed
+                </button>
+                <button
+                  type="button"
+                  class="next-step-action px-2 py-1 border rounded border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                  data-action="delayed"
+                  {% if not step_key %}disabled{% endif %}
+                >
+                  Delay
+                </button>
+                <button
+                  type="button"
+                  class="next-step-action px-2 py-1 border rounded border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                  data-action="rejected"
+                  {% if not step_key %}disabled{% endif %}
+                >
+                  Reject
+                </button>
+              </div>
+              <div class="next-step-panel next-step-panel-accepted mt-2 hidden text-xs text-slate-500">
+                <label class="inline-flex items-center gap-2">
+                  <span>Due date</span>
+                  <input class="next-step-due-date border rounded px-2 py-1" type="date" />
+                </label>
+                <button type="button" class="next-step-confirm px-2 py-1 border rounded">
+                  Confirm
+                </button>
+                <button type="button" class="next-step-cancel px-2 py-1 border rounded">
+                  Cancel
+                </button>
+              </div>
+              <div class="next-step-panel next-step-panel-completed mt-2 hidden text-xs text-slate-500">
+                <input
+                  class="next-step-completion-note border rounded px-2 py-1"
+                  type="text"
+                  placeholder="Optional note"
+                />
+                <button type="button" class="next-step-confirm px-2 py-1 border rounded">
+                  Confirm
+                </button>
+                <button type="button" class="next-step-cancel px-2 py-1 border rounded">
+                  Cancel
+                </button>
+              </div>
+              <div class="next-step-panel next-step-panel-delayed mt-2 hidden text-xs text-slate-500">
+                <select class="next-step-delay border rounded px-2 py-1">
+                  <option value="3">Delay 3 days</option>
+                  <option value="7" selected>Delay 7 days</option>
+                  <option value="14">Delay 14 days</option>
+                  <option value="30">Delay 30 days</option>
+                </select>
+                <button type="button" class="next-step-confirm px-2 py-1 border rounded">
+                  Confirm
+                </button>
+                <button type="button" class="next-step-cancel px-2 py-1 border rounded">
+                  Cancel
+                </button>
+              </div>
+              <div class="next-step-panel next-step-panel-rejected mt-2 hidden text-xs text-slate-500">
+                <select class="next-step-reason border rounded px-2 py-1">
+                  <option value="">Select reason</option>
+                  <option value="not_needed">项目不需要</option>
+                  <option value="deprioritized">不优先/以后再说</option>
+                  <option value="has_alternative">已有替代方案</option>
+                  <option value="inaccurate">信息不准确</option>
+                  <option value="other">其他</option>
+                </select>
+                <input
+                  class="next-step-reason-detail border rounded px-2 py-1 hidden"
+                  type="text"
+                  placeholder="简短说明"
+                />
+                <button type="button" class="next-step-confirm px-2 py-1 border rounded">
+                  Confirm
+                </button>
+                <button type="button" class="next-step-cancel px-2 py-1 border rounded">
+                  Cancel
+                </button>
               </div>
             </div>
           {% endfor %}
         </div>
       {% endif %}
+      <script>
+        if (!window.__nextStepFeedbackBound) {
+          window.__nextStepFeedbackBound = true;
+          const hidePanels = (item) => {
+            item.querySelectorAll(".next-step-panel").forEach((panel) => {
+              panel.classList.add("hidden");
+            });
+          };
+          const postAction = async (item, payload) => {
+            const goalId = item.dataset.goalId;
+            const response = await fetch(`/goals/${goalId}/next_steps/act`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+            if (!response.ok) {
+              alert("Action failed. Please try again.");
+              return;
+            }
+            const data = await response.json();
+            if (!data.ok) {
+              alert("Action failed. Please try again.");
+              return;
+            }
+            item.remove();
+          };
+
+          document.addEventListener("click", async (event) => {
+            const actionBtn = event.target.closest(".next-step-action");
+            const confirmBtn = event.target.closest(".next-step-confirm");
+            const cancelBtn = event.target.closest(".next-step-cancel");
+
+            if (actionBtn) {
+              const item = actionBtn.closest(".next-step-item");
+              if (!item) return;
+              const action = actionBtn.dataset.action;
+              hidePanels(item);
+              const panel = item.querySelector(`.next-step-panel-${action}`);
+              if (panel) panel.classList.remove("hidden");
+              return;
+            }
+
+            if (cancelBtn) {
+              const item = cancelBtn.closest(".next-step-item");
+              if (!item) return;
+              hidePanels(item);
+              return;
+            }
+
+            if (confirmBtn) {
+              const item = confirmBtn.closest(".next-step-item");
+              if (!item) return;
+              const panel = confirmBtn.closest(".next-step-panel");
+              if (!panel) return;
+              const suggestionId = item.dataset.suggestionId;
+              const stepKey = item.dataset.stepKey;
+              const stepText = item.dataset.stepText;
+              const action = panel.classList.contains("next-step-panel-accepted")
+                ? "accepted"
+                : panel.classList.contains("next-step-panel-completed")
+                ? "completed"
+                : panel.classList.contains("next-step-panel-delayed")
+                ? "delayed"
+                : "rejected";
+
+              const payload = {
+                suggestion_id: suggestionId,
+                step_key: stepKey,
+                step_text: stepText,
+                action,
+              };
+
+              if (action === "accepted") {
+                const dueInput = panel.querySelector(".next-step-due-date");
+                payload.due_date = dueInput ? dueInput.value : "";
+              }
+              if (action === "completed") {
+                const noteInput = panel.querySelector(".next-step-completion-note");
+                payload.completion_note = noteInput ? noteInput.value : "";
+              }
+              if (action === "delayed") {
+                const delaySelect = panel.querySelector(".next-step-delay");
+                payload.delay_days = delaySelect ? delaySelect.value : "7";
+              }
+              if (action === "rejected") {
+                const reasonSelect = panel.querySelector(".next-step-reason");
+                const reason = reasonSelect ? reasonSelect.value : "";
+                if (!reason) {
+                  alert("Please choose a reason.");
+                  return;
+                }
+                payload.reason = reason;
+                const detailInput = panel.querySelector(".next-step-reason-detail");
+                payload.reason_detail =
+                  reason === "other" && detailInput ? detailInput.value : "";
+              }
+              await postAction(item, payload);
+            }
+          });
+
+          document.addEventListener("change", (event) => {
+            const select = event.target.closest(".next-step-reason");
+            if (!select) return;
+            const panel = select.closest(".next-step-panel-rejected");
+            if (!panel) return;
+            const detail = panel.querySelector(".next-step-reason-detail");
+            if (!detail) return;
+            detail.classList.toggle("hidden", select.value !== "other");
+          });
+        }
+      </script>
       {% if analysis.metrics %}
         <div class="mt-3 text-xs text-slate-400">
           coverage {{ analysis.metrics.coverage }} · alignment {{ analysis.metrics.alignment }} · confidence {{ analysis.metrics.confidence }}

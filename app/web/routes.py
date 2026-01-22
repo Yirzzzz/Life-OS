@@ -9,6 +9,7 @@ import markdown
 from fastapi import APIRouter, Form, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.templating import Jinja2Templates
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.agent.executor import Executor
@@ -19,6 +20,7 @@ from app.domain.models import (
     Goal,
     HabitTemplate,
     Milestone,
+    NextStepFeedback,
     PlanItem,
     PlanItemSuppression,
     ShortTermObjective,
@@ -1855,6 +1857,203 @@ def regenerate_goal_analysis(
             "goal_analyses": {goal.id: goal_analysis},
         },
     )
+
+
+@router.post("/goals/{goal_id}/next_steps/accept", response_class=JSONResponse)
+async def accept_next_step(request: Request, goal_id: int) -> Response:
+    session = _get_session(request)
+    payload = await request.json()
+    suggestion_id = payload.get("suggestion_id")
+    step_key = payload.get("step_key")
+    step_text = payload.get("step_text") or ""
+    if not suggestion_id or not step_key:
+        return JSONResponse({"ok": False, "error": "missing_fields"}, status_code=400)
+    feedback = NextStepFeedback(
+        goal_id=goal_id,
+        suggestion_id=int(suggestion_id),
+        step_key=str(step_key),
+        step_text_snapshot=str(step_text),
+        action="accepted",
+        reason="accepted",
+        reason_detail="",
+    )
+    try:
+        session.add(feedback)
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+    return JSONResponse({"ok": True})
+
+
+@router.post("/goals/{goal_id}/next_steps/act", response_class=JSONResponse)
+async def act_on_next_step(request: Request, goal_id: int) -> Response:
+    session = _get_session(request)
+    payload = await request.json()
+    suggestion_id = payload.get("suggestion_id")
+    step_key = payload.get("step_key")
+    step_text = payload.get("step_text") or ""
+    action = payload.get("action")
+    if not suggestion_id or not step_key or not action:
+        return JSONResponse({"ok": False, "error": "missing_fields"}, status_code=400)
+    action = str(action)
+    if action not in {"accepted", "rejected", "delayed", "completed"}:
+        return JSONResponse({"ok": False, "error": "invalid_action"}, status_code=400)
+
+    reason = payload.get("reason") or action
+    reason_detail = payload.get("reason_detail") or ""
+
+    existing = session.exec(
+        select(NextStepFeedback).where(
+            NextStepFeedback.goal_id == goal_id,
+            NextStepFeedback.step_key == str(step_key),
+            NextStepFeedback.action == action,
+            NextStepFeedback.reason == str(reason),
+            NextStepFeedback.suggestion_id == int(suggestion_id),
+        )
+    ).first()
+    if existing:
+        return JSONResponse({"ok": True})
+
+    if action == "accepted":
+        due_date_raw = payload.get("due_date")
+        fallback_due = _today() + timedelta(days=7)
+        due_date = _parse_date(due_date_raw, fallback_due)
+        objective = ShortTermObjective(
+            title=str(step_text).strip() or "Next step",
+            linked_goal_id=goal_id,
+            due_date=due_date,
+            status="pending",
+            note="",
+        )
+        session.add(objective)
+        session.commit()
+        session.refresh(objective)
+        feedback = NextStepFeedback(
+            goal_id=goal_id,
+            suggestion_id=int(suggestion_id),
+            step_key=str(step_key),
+            step_text_snapshot=str(step_text),
+            action="accepted",
+            reason="accepted",
+            reason_detail="",
+            user_due_date=_parse_date(due_date_raw, fallback_due)
+            if due_date_raw
+            else None,
+            created_short_term_objective_id=objective.id,
+        )
+        session.add(feedback)
+        try:
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+        return JSONResponse(
+            {"ok": True, "objective_id": objective.id, "plan_item_id": None}
+        )
+
+    if action == "completed":
+        completion_note = payload.get("completion_note") or ""
+        log = _ensure_day_log(session, _today())
+        entry = f"- Completed next step: {step_text}".strip()
+        if completion_note:
+            entry = f"{entry} ({completion_note})"
+        if log.journal_md:
+            log.journal_md = f"{log.journal_md}\n{entry}"
+        else:
+            log.journal_md = entry
+        session.add(log)
+        session.commit()
+        feedback = NextStepFeedback(
+            goal_id=goal_id,
+            suggestion_id=int(suggestion_id),
+            step_key=str(step_key),
+            step_text_snapshot=str(step_text),
+            action="completed",
+            reason="completed",
+            reason_detail="",
+            completion_note=str(completion_note),
+        )
+        try:
+            session.add(feedback)
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+        return JSONResponse({"ok": True})
+
+    if action == "delayed":
+        delay_days = payload.get("delay_days") or 7
+        try:
+            delay_days = int(delay_days)
+        except (TypeError, ValueError):
+            delay_days = 7
+        if delay_days not in (3, 7, 14, 30):
+            delay_days = 7
+        snooze_until = datetime.utcnow() + timedelta(days=delay_days)
+        feedback = NextStepFeedback(
+            goal_id=goal_id,
+            suggestion_id=int(suggestion_id),
+            step_key=str(step_key),
+            step_text_snapshot=str(step_text),
+            action="delayed",
+            reason="delayed",
+            reason_detail="",
+            snooze_until=snooze_until,
+        )
+        try:
+            session.add(feedback)
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+        return JSONResponse({"ok": True, "snooze_until": snooze_until.isoformat()})
+
+    if action == "rejected":
+        reason = payload.get("reason")
+        if not reason:
+            return JSONResponse({"ok": False, "error": "missing_reason"}, status_code=400)
+        feedback = NextStepFeedback(
+            goal_id=goal_id,
+            suggestion_id=int(suggestion_id),
+            step_key=str(step_key),
+            step_text_snapshot=str(step_text),
+            action="rejected",
+            reason=str(reason),
+            reason_detail=str(reason_detail),
+        )
+        try:
+            session.add(feedback)
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+        return JSONResponse({"ok": True})
+
+    return JSONResponse({"ok": False, "error": "unhandled"}, status_code=400)
+
+
+@router.post("/goals/{goal_id}/next_steps/dismiss", response_class=JSONResponse)
+async def dismiss_next_step(request: Request, goal_id: int) -> Response:
+    session = _get_session(request)
+    payload = await request.json()
+    suggestion_id = payload.get("suggestion_id")
+    step_key = payload.get("step_key")
+    step_text = payload.get("step_text") or ""
+    reason = payload.get("reason")
+    reason_detail = payload.get("reason_detail") or ""
+    if not suggestion_id or not step_key or not reason:
+        return JSONResponse({"ok": False, "error": "missing_fields"}, status_code=400)
+    feedback = NextStepFeedback(
+        goal_id=goal_id,
+        suggestion_id=int(suggestion_id),
+        step_key=str(step_key),
+        step_text_snapshot=str(step_text),
+        action="dismissed",
+        reason=str(reason),
+        reason_detail=str(reason_detail),
+    )
+    try:
+        session.add(feedback)
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+    return JSONResponse({"ok": True})
 
 
 @router.post("/weekly-reflection/decide", response_class=HTMLResponse)

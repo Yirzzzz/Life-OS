@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
-from datetime import date, datetime
+import re
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
@@ -19,6 +21,7 @@ from app.domain.models import (
     PlanItem,
     ShortTermObjective,
     Suggestion,
+    NextStepFeedback,
 )
 
 logger = logging.getLogger(__name__)
@@ -122,6 +125,7 @@ class GoalAnalysisSkill(Skill):
         if data.trigger == "manual_regenerate":
             metrics["regenerated_at"] = datetime.utcnow().isoformat()
         output["metrics"] = metrics
+        _apply_next_step_keys_and_filter(session, goal.id, output)
 
         suggestion = None
         if data.existing_id:
@@ -144,6 +148,97 @@ class GoalAnalysisSkill(Skill):
             session.commit()
 
         return GoalAnalysisOutput(**output)
+
+
+def _normalize_step_text(text: str) -> str:
+    cleaned = (text or "").lower().strip()
+    cleaned = re.sub(r"[^\w\s]", "", cleaned)
+    cleaned = " ".join(cleaned.split())
+    return cleaned
+
+
+def _step_key(goal_id: int, step_text: str) -> str:
+    normalized = _normalize_step_text(step_text)
+    payload = f"{goal_id}:{normalized}".encode("utf-8")
+    return hashlib.sha1(payload).hexdigest()
+
+
+def _apply_next_step_keys_and_filter(
+    session: Session, goal_id: int, output: Dict[str, Any]
+) -> None:
+    steps = output.get("next_steps") or []
+    if not isinstance(steps, list):
+        return
+    filtered_steps = []
+    for item in steps:
+        if isinstance(item, dict):
+            text = str(item.get("text") or "").strip()
+            if text:
+                item["step_key"] = _step_key(goal_id, text)
+            filtered_steps.append(item)
+        else:
+            filtered_steps.append(item)
+    output["next_steps"] = filtered_steps
+
+    step_keys = [
+        item.get("step_key")
+        for item in filtered_steps
+        if isinstance(item, dict) and item.get("step_key")
+    ]
+    if not step_keys:
+        output["next_steps_filtered_count"] = 0
+        return
+
+    now = datetime.utcnow()
+    permanent_reasons = {"completed", "not_needed"}
+    ttl_days = {
+        "inaccurate": 30,
+        "deprioritized": 14,
+        "has_alternative": 30,
+        "other": 30,
+    }
+
+    feedback = session.exec(
+        select(NextStepFeedback)
+        .where(
+            NextStepFeedback.goal_id == goal_id,
+            NextStepFeedback.step_key.in_(step_keys),
+        )
+        .order_by(NextStepFeedback.created_at.desc())
+    ).all()
+
+    latest_by_key: Dict[str, NextStepFeedback] = {}
+    for fb in feedback:
+        if fb.step_key not in latest_by_key:
+            latest_by_key[fb.step_key] = fb
+
+    filtered = []
+    for item in filtered_steps:
+        if not isinstance(item, dict) or not item.get("step_key"):
+            filtered.append(item)
+            continue
+        step_key = item["step_key"]
+        fb = latest_by_key.get(step_key)
+        exclude = False
+        if fb:
+            action = fb.action
+            reason = fb.reason
+            if action in ("accepted", "completed"):
+                exclude = True
+            elif action in ("rejected", "dismissed"):
+                if reason in permanent_reasons:
+                    exclude = True
+                else:
+                    ttl = ttl_days.get(reason)
+                    if ttl is not None and now - fb.created_at < timedelta(days=ttl):
+                        exclude = True
+            elif action == "delayed":
+                if fb.snooze_until and now < fb.snooze_until:
+                    exclude = True
+        if not exclude:
+            filtered.append(item)
+    output["next_steps_filtered_count"] = len(filtered_steps) - len(filtered)
+    output["next_steps"] = filtered
 
 
 def _goal_window(goal: Goal, as_of: date) -> tuple[date, date, int]:
