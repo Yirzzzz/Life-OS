@@ -119,19 +119,19 @@
         {% endif %}
       {% endfor %}
 
-      {# ===== Replan Summary ===== #}
+      {# ===== Plan Summary ===== #}
       {% set replan = analysis.replan if analysis.replan else {} %}
       {% set show_replan = replan.needed or replan.summary or replan.why %}
-      {% set plan = analysis.plan if analysis.plan else {} %}
-      {% set plan_replan = plan.replan if plan.replan else {} %}
-      {% set plan_original = plan.original if plan.original else {} %}
-      {% set diff_summary = plan.diff_summary if plan.diff_summary else {"added_count": 0, "removed_count": 0, "changed_count": 0} %}
+      {% set plan_view = analysis.plan_view if analysis.plan_view else {} %}
+      {% set origin_view = plan_view.origin if plan_view.origin else {} %}
+      {% set replan_view = plan_view.replan if plan_view.replan else {} %}
+      {% set origin_available = origin_view.available %}
+      {% set replan_available = replan_view.available %}
+      {% set current_mode = plan_view.current_mode if plan_view.current_mode else ("replan" if replan_available else "origin") %}
+      {% set plan_summary_text = replan_view.summary if (current_mode == "replan" and replan_available) else origin_view.summary %}
       {% set plan_id = "plan-tabs-" ~ goal.id %}
-      {% set has_replan = plan_replan.available and plan_replan["items"] and (plan_replan["items"]|length > 0) %}
-      {% set has_original = plan_original.available and plan_original["items"] and (plan_original["items"]|length > 0) %}
-      {% set show_plan_block = show_replan or has_replan or has_original %}
 
-      {% if show_plan_block %}
+      {% if show_replan or origin_available or replan_available %}
         {% set replan_confidence = replan.confidence if replan.confidence else "Low" %}
         {% if replan_confidence == "High" %}
           {% set replan_badge_class = "bg-emerald-100 text-emerald-700" %}
@@ -148,14 +148,12 @@
             {% set _ = replan_evidence.items.append(ev) %}
           {% endif %}
         {% endfor %}
-        <div class="mt-3 text-xs text-slate-500">Replan Summary</div>
+        <div class="mt-3 text-xs text-slate-500">Plan Summary</div>
         <div class="mt-2 rounded border border-slate-200 bg-white p-2">
-          {% if replan.summary %}
-            <div class="text-sm font-medium text-slate-700">{{ replan.summary }}</div>
-          {% elif not show_replan %}
-            <div class="text-sm font-medium text-slate-700">No replan (replan_needed=false)</div>
+          {% if plan_summary_text %}
+            <div class="text-sm font-medium text-slate-700">{{ plan_summary_text }}</div>
           {% endif %}
-          {% if replan.why %}
+          {% if show_replan and replan.why %}
             <div class="mt-1 text-xs text-slate-500">Why: {{ replan.why }}</div>
           {% endif %}
           <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
@@ -184,7 +182,7 @@
             {% endif %}
           </div>
           <details class="mt-2 text-xs text-slate-500">
-            <summary class="cursor-pointer">Show plan</summary>
+            <summary class="cursor-pointer">Show detail</summary>
             <div class="mt-2 rounded border border-slate-200 bg-slate-50 p-3">
               <style>
                 #{{ plan_id }}-replan:checked ~ .plan-panels .plan-replan { display: block; }
@@ -200,32 +198,24 @@
                   color: #1f2937;
                 }
               </style>
-              {% set show_tabs = has_original %}
-              {% if show_tabs %}
+              {% if origin_available or replan_available %}
                 <input
                   id="{{ plan_id }}-replan"
                   type="radio"
                   name="{{ plan_id }}"
                   class="hidden"
-                  {% if has_replan %}checked{% endif %}
+                  {% if current_mode == "replan" %}checked{% endif %}
                 />
                 <input
                   id="{{ plan_id }}-original"
                   type="radio"
                   name="{{ plan_id }}"
                   class="hidden"
-                  {% if not has_replan %}checked{% endif %}
+                  {% if current_mode == "origin" %}checked{% endif %}
                 />
               {% endif %}
               <div class="flex flex-wrap items-center justify-between gap-2">
-                <div class="flex items-center gap-2">
-                  <div class="text-xs text-slate-500">
-                    Added {{ diff_summary.added_count }},
-                    Removed {{ diff_summary.removed_count }},
-                    Changed {{ diff_summary.changed_count }}
-                  </div>
-                </div>
-                {% if show_tabs %}
+                {% if origin_available or replan_available %}
                   <div class="plan-tabs inline-flex rounded border border-slate-200 bg-white text-xs">
                     <label
                       for="{{ plan_id }}-replan"
@@ -237,284 +227,25 @@
                       for="{{ plan_id }}-original"
                       class="cursor-pointer px-2 py-0.5 text-slate-600"
                     >
-                      Original
+                      Origin
                     </label>
                   </div>
                 {% endif %}
               </div>
 
               <div class="plan-panels mt-2">
-                <div class="plan-replan{% if not has_replan %} text-slate-400{% endif %}">
-                  {% if plan_replan.summary %}
-                    <div class="text-xs text-slate-500">{{ plan_replan.summary }}</div>
-                  {% endif %}
-                  {% if has_replan %}
-                    <div class="mt-2 space-y-2">
-                      {% for item in plan_replan["items"] %}
-                        {% if loop.index <= 3 %}
-                          {% set item_confidence = item.confidence if item.confidence else "Low" %}
-                          {% if item_confidence == "High" %}
-                            {% set badge_class = "bg-emerald-100 text-emerald-700" %}
-                          {% elif item_confidence == "Med" %}
-                            {% set badge_class = "bg-amber-100 text-amber-800" %}
-                          {% else %}
-                            {% set badge_class = "bg-rose-100 text-rose-700" %}
-                          {% endif %}
-                          {% set evidence_ids = item.evidence_ids if item.evidence_ids else [] %}
-                          {% set evidence_items = namespace(items=[]) %}
-                          {% for eid in evidence_ids %}
-                            {% set ev = evidence_map.items.get(eid) %}
-                            {% if ev %}
-                              {% set _ = evidence_items.items.append(ev) %}
-                            {% endif %}
-                          {% endfor %}
-                          <div class="rounded border border-slate-200 bg-white p-2">
-                            <div class="text-sm font-medium text-slate-700">{{ item.title }}</div>
-                            <div class="mt-1 text-xs text-slate-500 flex flex-wrap gap-2">
-                              <span>Timebox {{ item.timebox }}</span>
-                              <span>Deliverable {{ item.deliverable }}</span>
-                              {% if item.priority %}<span>{{ item.priority }}</span>{% endif %}
-                              {% if item.depends_on and item.depends_on|length > 0 %}
-                                <span>Depends on {{ item.depends_on|join(", ") }}</span>
-                              {% endif %}
-                            </div>
-                            <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                              <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {{ badge_class }}">
-                                {{ item_confidence }}
-                              </span>
-                              {% if evidence_items.items|length > 0 %}
-                                <details class="text-xs text-slate-500">
-                                  <summary class="cursor-pointer">Evidence ({{ evidence_items.items|length }})</summary>
-                                  <div class="mt-2 space-y-2">
-                                    {% for ev in evidence_items.items %}
-                                      <div class="rounded border border-slate-200 bg-white p-2 shadow-sm">
-                                        <div class="text-slate-700">{{ ev.quote }}</div>
-                                        <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-                                          <span>{{ ev.source_type }} · {{ ev.date }}</span>
-                                          {% if ev.url %}
-                                            <a class="underline" href="{{ ev.url }}">Open</a>
-                                          {% endif %}
-                                        </div>
-                                      </div>
-                                    {% endfor %}
-                                  </div>
-                                </details>
-                              {% else %}
-                                <span class="text-xs text-slate-400">Evidence (0)</span>
-                              {% endif %}
-                              {% if item.needs_confirmation or evidence_items.items|length == 0 %}
-                                <span class="text-xs text-slate-400">Needs confirmation / 缺少记录</span>
-                              {% endif %}
-                            </div>
-                          </div>
-                        {% endif %}
-                      {% endfor %}
-                    </div>
-                    {% if plan_replan["items"]|length > 3 %}
-                      <details class="mt-2 text-xs text-slate-500">
-                        <summary class="cursor-pointer">Show more</summary>
-                        <div class="mt-2 space-y-2">
-                          {% for item in plan_replan["items"] %}
-                            {% if loop.index > 3 %}
-                              {% set item_confidence = item.confidence if item.confidence else "Low" %}
-                              {% if item_confidence == "High" %}
-                                {% set badge_class = "bg-emerald-100 text-emerald-700" %}
-                              {% elif item_confidence == "Med" %}
-                                {% set badge_class = "bg-amber-100 text-amber-800" %}
-                              {% else %}
-                                {% set badge_class = "bg-rose-100 text-rose-700" %}
-                              {% endif %}
-                              {% set evidence_ids = item.evidence_ids if item.evidence_ids else [] %}
-                              {% set evidence_items = namespace(items=[]) %}
-                              {% for eid in evidence_ids %}
-                                {% set ev = evidence_map.items.get(eid) %}
-                                {% if ev %}
-                                  {% set _ = evidence_items.items.append(ev) %}
-                                {% endif %}
-                              {% endfor %}
-                              <div class="rounded border border-slate-200 bg-white p-2">
-                                <div class="text-sm font-medium text-slate-700">{{ item.title }}</div>
-                                <div class="mt-1 text-xs text-slate-500 flex flex-wrap gap-2">
-                                  <span>Timebox {{ item.timebox }}</span>
-                                  <span>Deliverable {{ item.deliverable }}</span>
-                                  {% if item.priority %}<span>{{ item.priority }}</span>{% endif %}
-                                  {% if item.depends_on and item.depends_on|length > 0 %}
-                                    <span>Depends on {{ item.depends_on|join(", ") }}</span>
-                                  {% endif %}
-                                </div>
-                                <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                                  <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {{ badge_class }}">
-                                    {{ item_confidence }}
-                                  </span>
-                                  {% if evidence_items.items|length > 0 %}
-                                    <details class="text-xs text-slate-500">
-                                      <summary class="cursor-pointer">Evidence ({{ evidence_items.items|length }})</summary>
-                                      <div class="mt-2 space-y-2">
-                                        {% for ev in evidence_items.items %}
-                                          <div class="rounded border border-slate-200 bg-white p-2 shadow-sm">
-                                            <div class="text-slate-700">{{ ev.quote }}</div>
-                                            <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-                                              <span>{{ ev.source_type }} · {{ ev.date }}</span>
-                                              {% if ev.url %}
-                                                <a class="underline" href="{{ ev.url }}">Open</a>
-                                              {% endif %}
-                                            </div>
-                                          </div>
-                                        {% endfor %}
-                                      </div>
-                                    </details>
-                                  {% else %}
-                                    <span class="text-xs text-slate-400">Evidence (0)</span>
-                                  {% endif %}
-                                  {% if item.needs_confirmation or evidence_items.items|length == 0 %}
-                                    <span class="text-xs text-slate-400">Needs confirmation / 缺少记录</span>
-                                  {% endif %}
-                                </div>
-                              </div>
-                            {% endif %}
-                          {% endfor %}
-                        </div>
-                      </details>
-                    {% endif %}
+                <div class="plan-replan">
+                  {% if replan_available and replan_view.detail %}
+                    <pre class="text-xs text-slate-500 whitespace-pre-wrap">{{ replan_view.detail }}</pre>
                   {% else %}
-                    <div class="mt-2 text-xs text-slate-400">No replan (replan_needed=false)</div>
+                    <div class="text-xs text-slate-400">No replan</div>
                   {% endif %}
                 </div>
-
-                <div class="plan-original{% if has_replan %} hidden{% endif %}">
-                  {% if plan_original.summary %}
-                    <div class="text-xs text-slate-500">{{ plan_original.summary }}</div>
-                  {% endif %}
-                  {% if has_original %}
-                    <div class="mt-2 space-y-2">
-                      {% for item in plan_original["items"] %}
-                        {% if loop.index <= 3 %}
-                          {% set item_confidence = item.confidence if item.confidence else "Low" %}
-                          {% if item_confidence == "High" %}
-                            {% set badge_class = "bg-emerald-100 text-emerald-700" %}
-                          {% elif item_confidence == "Med" %}
-                            {% set badge_class = "bg-amber-100 text-amber-800" %}
-                          {% else %}
-                            {% set badge_class = "bg-rose-100 text-rose-700" %}
-                          {% endif %}
-                          {% set evidence_ids = item.evidence_ids if item.evidence_ids else [] %}
-                          {% set evidence_items = namespace(items=[]) %}
-                          {% for eid in evidence_ids %}
-                            {% set ev = evidence_map.items.get(eid) %}
-                            {% if ev %}
-                              {% set _ = evidence_items.items.append(ev) %}
-                            {% endif %}
-                          {% endfor %}
-                          <div class="rounded border border-slate-200 bg-white p-2">
-                            <div class="text-sm font-medium text-slate-700">{{ item.title }}</div>
-                            <div class="mt-1 text-xs text-slate-500 flex flex-wrap gap-2">
-                              <span>Timebox {{ item.timebox }}</span>
-                              <span>Deliverable {{ item.deliverable }}</span>
-                              {% if item.priority %}<span>{{ item.priority }}</span>{% endif %}
-                              {% if item.depends_on and item.depends_on|length > 0 %}
-                                <span>Depends on {{ item.depends_on|join(", ") }}</span>
-                              {% endif %}
-                            </div>
-                            <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                              <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {{ badge_class }}">
-                                {{ item_confidence }}
-                              </span>
-                              {% if evidence_items.items|length > 0 %}
-                                <details class="text-xs text-slate-500">
-                                  <summary class="cursor-pointer">Evidence ({{ evidence_items.items|length }})</summary>
-                                  <div class="mt-2 space-y-2">
-                                    {% for ev in evidence_items.items %}
-                                      <div class="rounded border border-slate-200 bg-white p-2 shadow-sm">
-                                        <div class="text-slate-700">{{ ev.quote }}</div>
-                                        <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-                                          <span>{{ ev.source_type }} · {{ ev.date }}</span>
-                                          {% if ev.url %}
-                                            <a class="underline" href="{{ ev.url }}">Open</a>
-                                          {% endif %}
-                                        </div>
-                                      </div>
-                                    {% endfor %}
-                                  </div>
-                                </details>
-                              {% else %}
-                                <span class="text-xs text-slate-400">Evidence (0)</span>
-                              {% endif %}
-                              {% if item.needs_confirmation or evidence_items.items|length == 0 %}
-                                <span class="text-xs text-slate-400">Needs confirmation / 缺少记录</span>
-                              {% endif %}
-                            </div>
-                          </div>
-                        {% endif %}
-                      {% endfor %}
-                    </div>
-                    {% if plan_original["items"]|length > 3 %}
-                      <details class="mt-2 text-xs text-slate-500">
-                        <summary class="cursor-pointer">Show more</summary>
-                        <div class="mt-2 space-y-2">
-                          {% for item in plan_original["items"] %}
-                            {% if loop.index > 3 %}
-                              {% set item_confidence = item.confidence if item.confidence else "Low" %}
-                              {% if item_confidence == "High" %}
-                                {% set badge_class = "bg-emerald-100 text-emerald-700" %}
-                              {% elif item_confidence == "Med" %}
-                                {% set badge_class = "bg-amber-100 text-amber-800" %}
-                              {% else %}
-                                {% set badge_class = "bg-rose-100 text-rose-700" %}
-                              {% endif %}
-                              {% set evidence_ids = item.evidence_ids if item.evidence_ids else [] %}
-                              {% set evidence_items = namespace(items=[]) %}
-                              {% for eid in evidence_ids %}
-                                {% set ev = evidence_map.items.get(eid) %}
-                                {% if ev %}
-                                  {% set _ = evidence_items.items.append(ev) %}
-                                {% endif %}
-                              {% endfor %}
-                              <div class="rounded border border-slate-200 bg-white p-2">
-                                <div class="text-sm font-medium text-slate-700">{{ item.title }}</div>
-                                <div class="mt-1 text-xs text-slate-500 flex flex-wrap gap-2">
-                                  <span>Timebox {{ item.timebox }}</span>
-                                  <span>Deliverable {{ item.deliverable }}</span>
-                                  {% if item.priority %}<span>{{ item.priority }}</span>{% endif %}
-                                  {% if item.depends_on and item.depends_on|length > 0 %}
-                                    <span>Depends on {{ item.depends_on|join(", ") }}</span>
-                                  {% endif %}
-                                </div>
-                                <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                                  <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {{ badge_class }}">
-                                    {{ item_confidence }}
-                                  </span>
-                                  {% if evidence_items.items|length > 0 %}
-                                    <details class="text-xs text-slate-500">
-                                      <summary class="cursor-pointer">Evidence ({{ evidence_items.items|length }})</summary>
-                                      <div class="mt-2 space-y-2">
-                                        {% for ev in evidence_items.items %}
-                                          <div class="rounded border border-slate-200 bg-white p-2 shadow-sm">
-                                            <div class="text-slate-700">{{ ev.quote }}</div>
-                                            <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-                                              <span>{{ ev.source_type }} · {{ ev.date }}</span>
-                                              {% if ev.url %}
-                                                <a class="underline" href="{{ ev.url }}">Open</a>
-                                              {% endif %}
-                                            </div>
-                                          </div>
-                                        {% endfor %}
-                                      </div>
-                                    </details>
-                                  {% else %}
-                                    <span class="text-xs text-slate-400">Evidence (0)</span>
-                                  {% endif %}
-                                  {% if item.needs_confirmation or evidence_items.items|length == 0 %}
-                                    <span class="text-xs text-slate-400">Needs confirmation / 缺少记录</span>
-                                  {% endif %}
-                                </div>
-                              </div>
-                            {% endif %}
-                          {% endfor %}
-                        </div>
-                      </details>
-                    {% endif %}
+                <div class="plan-original{% if current_mode == "replan" %} hidden{% endif %}">
+                  {% if origin_available and origin_view.detail %}
+                    <pre class="text-xs text-slate-500 whitespace-pre-wrap">{{ origin_view.detail }}</pre>
                   {% else %}
-                    <div class="mt-2 text-xs text-slate-400">No original plan</div>
+                    <div class="text-xs text-slate-400">No original plan</div>
                   {% endif %}
                 </div>
               </div>

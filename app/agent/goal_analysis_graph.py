@@ -290,39 +290,20 @@ def _build_prompt_node_b(payload: Dict[str, Any], lang: str) -> str:
 
 
 def _prompt_addon_node_b(payload: Dict[str, Any], lang: str) -> str:
-    evidence = payload.get("raw_evidence", [])
-    logs = payload.get("recent_logs", [])
-    plans = payload.get("recent_plan_items", [])
-    objectives = payload.get("short_term_objectives", [])
-    milestones = payload.get("milestones", [])
     if lang == "en":
         return (
             "ADDON (DO NOT CHANGE ANY EXISTING FIELDS):\n"
-            "- Append two new fields ONLY: plan_summary_v1 (1–2 sentences) and plan_items_v1.\n"
-            "- plan_items_v1: 3–7 items with fields {id,title,deliverable,timebox,priority,depends_on,evidence_ids,confidence,needs_confirmation}.\n"
-            "- title must start with a verb; deliverable must be a verifiable artifact; timebox format 2h/0.5d/1d.\n"
-            "- evidence_ids MUST reference evidence_pool below; if none, needs_confirmation=true and confidence=Low.\n"
+            "- Append two new fields ONLY: plan_detail_text_v1 and plan_summary_text_v1.\n"
+            "- plan_detail_text_v1 must be the full planning content in plain text.\n"
+            "- plan_summary_text_v1 must be 1–2 natural language sentences (no JSON/arrays/code).\n"
             "- Do NOT modify existing keys or their content.\n"
-            "\n"
-            f"evidence_pool: {json.dumps(evidence, ensure_ascii=False)}\n"
-            f"logs: {json.dumps(logs, ensure_ascii=False)}\n"
-            f"plans: {json.dumps(plans, ensure_ascii=False)}\n"
-            f"objectives: {json.dumps(objectives, ensure_ascii=False)}\n"
-            f"milestones: {json.dumps(milestones, ensure_ascii=False)}"
         )
     return (
         "ADDON（不得修改任何已有字段）：\n"
-        "- 只追加 plan_summary_v1（1–2句）与 plan_items_v1。\n"
-        "- plan_items_v1：3–7 条，字段 {id,title,deliverable,timebox,priority,depends_on,evidence_ids,confidence,needs_confirmation}。\n"
-        "- title 必须动词开头；deliverable 必须可验收产物；timebox 格式 2h/0.5d/1d。\n"
-        "- evidence_ids 必须来自下方 evidence_pool；若无证据，needs_confirmation=true 且 confidence=Low。\n"
+        "- 只追加 plan_detail_text_v1 与 plan_summary_text_v1。\n"
+        "- plan_detail_text_v1 为完整规划内容（纯文本）。\n"
+        "- plan_summary_text_v1 为 1–2 句自然语言摘要（不要 JSON/数组/代码块）。\n"
         "- 不得修改已有字段或其内容。\n"
-        "\n"
-        f"evidence_pool: {json.dumps(evidence, ensure_ascii=False)}\n"
-        f"logs: {json.dumps(logs, ensure_ascii=False)}\n"
-        f"plans: {json.dumps(plans, ensure_ascii=False)}\n"
-        f"objectives: {json.dumps(objectives, ensure_ascii=False)}\n"
-        f"milestones: {json.dumps(milestones, ensure_ascii=False)}"
     )
 def _build_prompt_node_b_replan(payload, node_c, progress_signals, lang) -> str:
     schema = (
@@ -369,27 +350,20 @@ def _build_prompt_node_b_replan(payload, node_c, progress_signals, lang) -> str:
 
 
 def _prompt_addon_node_b_replan(payload: Dict[str, Any], lang: str) -> str:
-    evidence = payload.get("raw_evidence", [])
     if lang == "en":
         return (
             "ADDON (DO NOT CHANGE ANY EXISTING FIELDS):\n"
-            "- Append replan_plan_items_v1 (3–6 items), replan_plan_summary_v1 (1–2 sentences), diff_summary_v1.\n"
-            "- replan_plan_items_v1 fields: {id,title,deliverable,timebox,priority,depends_on,evidence_ids,confidence,needs_confirmation}.\n"
-            "- evidence_ids MUST reference evidence_pool below; if none, needs_confirmation=true and confidence=Low.\n"
-            "- diff_summary_v1 fields: {added_count,removed_count,changed_count} (rough estimate OK).\n"
+            "- Append replan_detail_text_v1 and replan_summary_text_v1.\n"
+            "- replan_detail_text_v1 must be the full replanned content in plain text.\n"
+            "- replan_summary_text_v1 must be 1–2 natural language sentences (no JSON/arrays/code).\n"
             "- Do NOT modify existing keys or their content.\n"
-            "\n"
-            f"evidence_pool: {json.dumps(evidence, ensure_ascii=False)}"
         )
     return (
         "ADDON（不得修改任何已有字段）：\n"
-        "- 追加 replan_plan_items_v1（3–6条）、replan_plan_summary_v1（1–2句）、diff_summary_v1。\n"
-        "- replan_plan_items_v1 字段：{id,title,deliverable,timebox,priority,depends_on,evidence_ids,confidence,needs_confirmation}。\n"
-        "- evidence_ids 必须来自下方 evidence_pool；无证据则 needs_confirmation=true 且 confidence=Low。\n"
-        "- diff_summary_v1 字段：{added_count,removed_count,changed_count}（粗略即可）。\n"
+        "- 追加 replan_detail_text_v1 与 replan_summary_text_v1。\n"
+        "- replan_detail_text_v1 为完整重规划内容（纯文本）。\n"
+        "- replan_summary_text_v1 为 1–2 句自然语言摘要（不要 JSON/数组/代码块）。\n"
         "- 不得修改已有字段或其内容。\n"
-        "\n"
-        f"evidence_pool: {json.dumps(evidence, ensure_ascii=False)}"
     )
 
 def _build_prompt_node_c(node_a, node_b, progress_signals, lang) -> str:
@@ -964,6 +938,132 @@ def _normalize_claim_list(
     )
 
 
+def _is_json_like(text: str) -> bool:
+    if not isinstance(text, str):
+        return False
+    stripped = text.strip()
+    if not stripped:
+        return False
+    if stripped[0] in {"{", "["}:
+        return True
+    try:
+        json.loads(stripped)
+    except Exception:  # noqa: BLE001
+        return False
+    return True
+
+
+def _first_sentences(text: str, max_sentences: int = 2) -> str:
+    cleaned = _normalize_text(text)
+    if not cleaned:
+        return ""
+    parts = re.split(r"([。！？.!?])", cleaned)
+    sentences: List[str] = []
+    current = ""
+    for part in parts:
+        if part in {"。", "！", "？", ".", "!", "?"}:
+            current += part
+            sentences.append(current.strip())
+            current = ""
+        else:
+            current += part
+        if len(sentences) >= max_sentences:
+            break
+    if not sentences and current.strip():
+        sentences.append(current.strip())
+    return " ".join(sentences[:max_sentences])
+
+
+def _summary_from_outline(outline: Any, lang: str) -> str:
+    if not isinstance(outline, list) or not outline:
+        return ""
+    deliverables: List[str] = []
+    for phase in outline:
+        if isinstance(phase, dict):
+            for item in phase.get("deliverables", []) or []:
+                if item:
+                    deliverables.append(str(item))
+    deliverables = deliverables[:2]
+    phase_count = len(outline)
+    if lang == "en":
+        if deliverables:
+            return (
+                f"Plan has {phase_count} phases and focuses on {', '.join(deliverables)}."
+            )
+        return f"Plan has {phase_count} phases with concrete deliverables."
+    if deliverables:
+        return f"计划包含 {phase_count} 个阶段，聚焦交付：{', '.join(deliverables)}。"
+    return f"计划包含 {phase_count} 个阶段，包含可交付成果。"
+
+
+def _coerce_summary_text(
+    summary_text: str, detail_text: str, outline: Any, lang: str
+) -> str:
+    if summary_text and not _is_json_like(summary_text):
+        return summary_text.strip()
+    if detail_text and not _is_json_like(detail_text):
+        return _first_sentences(detail_text, 2)
+    summary = _summary_from_outline(outline, lang)
+    if summary:
+        return summary
+    if detail_text:
+        return _first_sentences(detail_text, 2)
+    return ""
+
+
+def _coerce_detail_text(detail_text: str, outline: Any) -> str:
+    if detail_text and not _is_json_like(detail_text):
+        return detail_text.strip()
+    if isinstance(outline, list) and outline:
+        return json.dumps(outline, ensure_ascii=False, indent=2)
+    return ""
+
+
+def _build_plan_view_v1(
+    node_b_original: Dict[str, Any],
+    node_b_replan: Optional[Dict[str, Any]],
+    node_c: Dict[str, Any],
+    lang: str,
+) -> Dict[str, Any]:
+    origin_outline = node_b_original.get("plan_outline") if isinstance(node_b_original, dict) else []
+    origin_detail = (
+        node_b_original.get("plan_detail_text_v1") if isinstance(node_b_original, dict) else ""
+    )
+    origin_summary = (
+        node_b_original.get("plan_summary_text_v1") if isinstance(node_b_original, dict) else ""
+    )
+    origin_detail = _coerce_detail_text(str(origin_detail or ""), origin_outline)
+    origin_summary = _coerce_summary_text(str(origin_summary or ""), origin_detail, origin_outline, lang)
+
+    replan_outline = node_b_replan.get("plan_outline") if isinstance(node_b_replan, dict) else []
+    replan_detail = (
+        node_b_replan.get("replan_detail_text_v1") if isinstance(node_b_replan, dict) else ""
+    )
+    replan_summary = (
+        node_b_replan.get("replan_summary_text_v1") if isinstance(node_b_replan, dict) else ""
+    )
+    replan_detail = _coerce_detail_text(str(replan_detail or ""), replan_outline)
+    replan_summary = _coerce_summary_text(str(replan_summary or ""), replan_detail, replan_outline, lang)
+
+    replan_available = bool(node_c.get("replan_needed") and (replan_detail or replan_summary or replan_outline))
+    origin_available = bool(origin_detail or origin_summary or origin_outline)
+    current_mode = "replan" if replan_available else "origin"
+
+    return {
+        "current_mode": current_mode,
+        "origin": {
+            "available": origin_available,
+            "summary": origin_summary,
+            "detail": origin_detail,
+        },
+        "replan": {
+            "available": replan_available,
+            "summary": replan_summary,
+            "detail": replan_detail,
+        },
+    }
+
+
 def _normalize_timebox_v1(value: Any) -> str:
     if not isinstance(value, str):
         return ""
@@ -1510,6 +1610,9 @@ def _node_d(
                 plan_items, parsed.get("highlights") or [], max_steps, plan_summary, lang
             )
             _ensure_next_step_reasons(parsed, node_c, lang)
+        parsed["plan_view"] = _build_plan_view_v1(
+            node_b_original, node_b_replan, node_c, lang
+        )
         trust = parsed.get("trust_summary") or {}
         if isinstance(trust, dict):
             trust["broken_evidence_id_count"] = int(
@@ -1546,6 +1649,9 @@ def _node_d(
             plan_items, fallback.get("highlights") or [], max_steps, plan_summary, lang
         )
         _ensure_next_step_reasons(fallback, node_c, lang)
+    fallback["plan_view"] = _build_plan_view_v1(
+        node_b_original, node_b_replan, node_c, lang
+    )
     trust = fallback.get("trust_summary") or {}
     if isinstance(trust, dict):
         trust["broken_evidence_id_count"] = int(
