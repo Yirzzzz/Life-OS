@@ -107,6 +107,26 @@ class SuggestionDecision(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class NextStepFeedback(SQLModel, table=True):
+    __tablename__ = "next_step_feedback"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    goal_id: int = Field(foreign_key="goal.id")
+    suggestion_id: int = Field(foreign_key="suggestion.id")
+    step_key: str
+    step_text_snapshot: str = Field(default="", sa_column=Column(Text))
+    action: str
+    reason: str
+    reason_detail: str = Field(default="", sa_column=Column(Text))
+    snooze_until: Optional[datetime] = None
+    user_due_date: Optional[date] = None
+    created_short_term_objective_id: Optional[int] = Field(
+        default=None, foreign_key="short_term_objective.id"
+    )
+    created_plan_item_id: Optional[int] = Field(default=None, foreign_key="planitem.id")
+    completion_note: str = Field(default="", sa_column=Column(Text))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class AgentRunLog(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     skill_name: str

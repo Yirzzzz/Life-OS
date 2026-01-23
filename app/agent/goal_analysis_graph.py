@@ -60,6 +60,8 @@ class GoalAnalysisGraph:
         node_a, node_b, node_a_meta, node_b_meta = _run_parallel_ab(
             payload, model_key, api_key, lang
         )
+        node_b_original = node_b
+        node_b_replan = None
         progress_signals = _progress_signals(payload, node_a)
         node_c, node_c_meta = _node_c(
             node_a, node_b, progress_signals, model_key, api_key, lang
@@ -69,8 +71,17 @@ class GoalAnalysisGraph:
             node_b, node_b_meta = _node_b_replan(
                 payload, node_c, progress_signals, model_key, api_key, lang
             )
+            node_b_replan = node_b
         node_d, node_d_meta = _node_d(
-            node_a, node_b, node_c, progress_signals, model_key, api_key, lang
+            node_a,
+            node_b,
+            node_b_original,
+            node_b_replan,
+            node_c,
+            progress_signals,
+            model_key,
+            api_key,
+            lang,
         )
         metrics = node_d.get("metrics", {})
         metrics["node_a"] = node_a_meta
@@ -129,7 +140,7 @@ def _run_parallel_ab(
     return node_a, node_b, node_a_meta, node_b_meta
 def _build_prompt_node_a(payload: Dict[str, Any], lang: str) -> str:
     schema = (
-        '{"evidence":[{"id":int,"date":"YYYY-MM-DD","source_type":"log|plan|objective|milestone","source_id":int,'
+        '{"evidence":[{"id":int,"date":"YYYY-MM-DD","source_type":"log|plan|objective|milestone|next_step_feedback","source_id":int,'
         '"quote":str,"url":str,"tags":[str]}],'
         '"habit_summary":{"top_patterns":[{"text":str,"evidence_ids":[int]}],'
         '"blockers":[{"text":str,"evidence_ids":[int]}],'
@@ -143,6 +154,7 @@ def _build_prompt_node_a(payload: Dict[str, Any], lang: str) -> str:
     plans = payload.get("recent_plan_items", [])
     objectives = payload.get("short_term_objectives", [])
     milestones = payload.get("milestones", [])
+    next_step_feedback = payload.get("recent_next_step_feedback", [])
 
     if lang == "en":
         return (
@@ -150,7 +162,7 @@ def _build_prompt_node_a(payload: Dict[str, Any], lang: str) -> str:
             "Goal: extract ONLY evidence and habit patterns that are DIRECTLY relevant to the given goal.\n"
             "\n"
             "SCOPE CONSTRAINT (MOST IMPORTANT):\n"
-            "- You MUST only use logs/plans/objectives/milestones that are clearly related to goal.title/goal.description_md.\n"
+            "- You MUST only use logs/plans/objectives/milestones/next_step_feedback that are clearly related to goal.title/goal.description_md.\n"
             "- Relevance definition: an item is relevant only if it (a) describes work/action/outcome toward the goal, or\n"
             "  (b) describes a blocker/trigger that directly affects progress on the goal.\n"
             "- If you cannot explain the connection to the goal, it is NOT relevant and MUST be excluded.\n"
@@ -169,10 +181,15 @@ def _build_prompt_node_a(payload: Dict[str, Any], lang: str) -> str:
             "- Output JSON only. No markdown, no extra text.\n"
             "- Do NOT fabricate. Every conclusion must cite evidence_ids.\n"
             "- evidence[].quote MUST be an exact excerpt from the input (verbatim).\n"
+            "- For source_type=next_step_feedback, evidence.quote MUST be exactly (action: step_text_snapshot) from input (use evidence_text if provided).\n"
+            "- For next_step_feedback evidence, set source_id to the feedback id from input.\n"
+        "- ? next_step_feedback ????source_id ???????? feedback id?\n"
             "- tags are 1–3 short labels such as: goal_progress, goal_action, goal_deliverable, blocker, trigger, plan_step, milestone.\n"
+            "- For next_step_feedback evidence, include tags for action (accepted/rejected/delayed/completed) and snooze_until=YYYY-MM-DD when present.\n"
             "\n"
             "WHAT TO EXTRACT:\n"
             "1) evidence: pick up to 10 most informative GOAL-RELEVANT items (prefer logs). Assign incremental id starting from 1.\n"
+            "- You can use next_step_feedback as evidence when it directly reflects goal-related actions or decisions.\n"
             "2) habit_summary:\n"
             "   - top_patterns: 1–3 recurring goal-related behavior patterns you can prove from evidence.\n"
             "   - blockers: 1–3 recurring goal-related blockers.\n"
@@ -188,7 +205,8 @@ def _build_prompt_node_a(payload: Dict[str, Any], lang: str) -> str:
             f"logs: {json.dumps(logs, ensure_ascii=False)}\n"
             f"plans: {json.dumps(plans, ensure_ascii=False)}\n"
             f"objectives: {json.dumps(objectives, ensure_ascii=False)}\n"
-            f"milestones: {json.dumps(milestones, ensure_ascii=False)}"
+            f"milestones: {json.dumps(milestones, ensure_ascii=False)}\n"
+            f"next_step_feedback: {json.dumps(next_step_feedback, ensure_ascii=False)}"
         )
 
     return (
@@ -196,7 +214,7 @@ def _build_prompt_node_a(payload: Dict[str, Any], lang: str) -> str:
         "目标：只提取与 goal.title / goal.description_md 直接相关的证据与习惯模式。\n"
         "\n"
         "范围约束（最重要，必须遵守）：\n"
-        "- 你只能使用与目标明确相关的 logs/plans/objectives/milestones。\n"
+        "- 你只能使用与目标明确相关的 logs/plans/objectives/milestones/next_step_feedback。\n"
         "- “相关”的定义：一条记录必须 (a) 直接描述推进目标的行动/产出/结果，或 (b) 直接描述影响该目标推进的阻碍/触发因素。\n"
         "- 如果你无法用一句话解释“它如何影响这个目标”，则判定为不相关，必须排除。\n"
         "\n"
@@ -214,10 +232,13 @@ def _build_prompt_node_a(payload: Dict[str, Any], lang: str) -> str:
         "- 只输出 JSON，不要 markdown，不要多余文字。\n"
         "- 不得编造。任何结论都必须给 evidence_ids。\n"
         "- evidence[].quote 必须是输入中的原文片段（逐字一致）。\n"
+        "- 若 source_type=next_step_feedback?evidence.quote 必须严格使用??action?step_text_snapshot???优先用 evidence_text??\n"
         "- tags 控制为 1–3 个短标签：goal_progress/goal_action/goal_deliverable/blocker/trigger/plan_step/milestone 等。\n"
+        "- 对 next_step_feedback 的证据?tags 需包含 action?accepted/rejected/delayed/completed??且如有 snooze_until 请补充 snooze_until=YYYY-MM-DD?\n"
         "\n"
         "你需要输出：\n"
         "1) evidence：最多 10 条“最关键的目标相关证据”（优先 logs），id 从 1 递增。\n"
+        "- 可以使用 next_step_feedback 作为证据，但必须直接反映与目标相关的行动或决策。\n"
         "2) habit_summary（也必须是目标相关）：\n"
         "   - top_patterns：1–3 条“反复出现的、与目标推进相关的行为模式”（要能被证据支撑）。\n"
         "   - blockers：1–3 条“反复出现的、影响目标推进的阻碍/卡点”。\n"
@@ -233,7 +254,8 @@ def _build_prompt_node_a(payload: Dict[str, Any], lang: str) -> str:
         f"logs: {json.dumps(logs, ensure_ascii=False)}\n"
         f"plans: {json.dumps(plans, ensure_ascii=False)}\n"
         f"objectives: {json.dumps(objectives, ensure_ascii=False)}\n"
-        f"milestones: {json.dumps(milestones, ensure_ascii=False)}"
+        f"milestones: {json.dumps(milestones, ensure_ascii=False)}\n"
+        f"next_step_feedback: {json.dumps(next_step_feedback, ensure_ascii=False)}"
     )
 
 
@@ -277,6 +299,23 @@ def _build_prompt_node_b(payload: Dict[str, Any], lang: str) -> str:
         f"window: {json.dumps(window, ensure_ascii=False)}"
     )
 
+
+def _prompt_addon_node_b(payload: Dict[str, Any], lang: str) -> str:
+    if lang == "en":
+        return (
+            "ADDON (DO NOT CHANGE ANY EXISTING FIELDS):\n"
+            "- Append two new fields ONLY: plan_detail_text_v1 and plan_summary_text_v1.\n"
+            "- plan_detail_text_v1 must be the full planning content in plain text.\n"
+            "- plan_summary_text_v1 must be 1–2 natural language sentences (no JSON/arrays/code).\n"
+            "- Do NOT modify existing keys or their content.\n"
+        )
+    return (
+        "ADDON（不得修改任何已有字段）：\n"
+        "- 只追加 plan_detail_text_v1 与 plan_summary_text_v1。\n"
+        "- plan_detail_text_v1 为完整规划内容（纯文本）。\n"
+        "- plan_summary_text_v1 为 1–2 句自然语言摘要（不要 JSON/数组/代码块）。\n"
+        "- 不得修改已有字段或其内容。\n"
+    )
 def _build_prompt_node_b_replan(payload, node_c, progress_signals, lang) -> str:
     schema = (
         '{"plan_outline":[{"phase":str,"deliverables":[str],"milestones":[str]}],'
@@ -321,10 +360,28 @@ def _build_prompt_node_b_replan(payload, node_c, progress_signals, lang) -> str:
     )
 
 
+def _prompt_addon_node_b_replan(payload: Dict[str, Any], lang: str) -> str:
+    if lang == "en":
+        return (
+            "ADDON (DO NOT CHANGE ANY EXISTING FIELDS):\n"
+            "- Append replan_detail_text_v1 and replan_summary_text_v1.\n"
+            "- replan_detail_text_v1 must be the full replanned content in plain text.\n"
+            "- replan_summary_text_v1 must be 1–2 natural language sentences (no JSON/arrays/code).\n"
+            "- Do NOT modify existing keys or their content.\n"
+        )
+    return (
+        "ADDON（不得修改任何已有字段）：\n"
+        "- 追加 replan_detail_text_v1 与 replan_summary_text_v1。\n"
+        "- replan_detail_text_v1 为完整重规划内容（纯文本）。\n"
+        "- replan_summary_text_v1 为 1–2 句自然语言摘要（不要 JSON/数组/代码块）。\n"
+        "- 不得修改已有字段或其内容。\n"
+    )
+
 def _build_prompt_node_c(node_a, node_b, progress_signals, lang) -> str:
     schema = (
         '{"verdict":"too_big|aligned|too_small|unclear","reason":str,"evidence_ids":[int],'
         '"replan_needed":bool,"replan_reason":str,"replan_instructions":[str],'
+        '"replan_rationale_summary":str,"replan_evidence_ids":[int],'
         '"max_next_steps":int,"confidence":0.0,"alignment":0.0}'
     )
     if lang == "en":
@@ -336,6 +393,7 @@ def _build_prompt_node_c(node_a, node_b, progress_signals, lang) -> str:
             "- Output JSON only.\n"
             "- reason MUST reference evidence_ids from node_a.evidence.\n"
             "- If replan_needed=true, replan_instructions MUST be non-empty (2–4 items) and actionable.\n"
+            "- If replan_needed=true, replan_rationale_summary MUST be a concise, user-facing why summary.\n"
             "- replan_instructions MUST explicitly prevent the same failure (e.g., reduce phases, limit deliverables per phase, focus on one core deliverable).\n"
             "\n"
             "HOW TO JUDGE:\n"
@@ -361,6 +419,7 @@ def _build_prompt_node_c(node_a, node_b, progress_signals, lang) -> str:
         "- 只输出 JSON。\n"
         "- reason 必须引用 node_a.evidence 的 evidence_ids（不能空口判断）。\n"
         "- 若 replan_needed=true：replan_instructions 必须非空（2–4条），且必须具体可执行。\n"
+        "- 若 replan_needed=true：replan_rationale_summary 必须给出一句面向用户的“为什么要重计划”的摘要。\n"
         "- replan_instructions 必须能避免同类问题再次出现（例如：减少阶段数、限制每阶段交付物数量、优先一个核心交付物、明确验收标准）。\n"
         "\n"
         "判断口径：\n"
@@ -380,12 +439,47 @@ def _build_prompt_node_c(node_a, node_b, progress_signals, lang) -> str:
     )
 
 
+def _prompt_addon_node_c(lang: str) -> str:
+    if lang == "en":
+        return (
+            "ADDON (DO NOT CHANGE ANY EXISTING FIELDS):\n"
+            "- Always output replan_rationale_summary and replan_evidence_ids.\n"
+            "- If replan_needed=false, replan_rationale_summary should briefly say why replan is not needed and replan_evidence_ids=[].\n"
+            "- Do NOT modify existing keys or their content."
+        )
+    return (
+        "ADDON（不得修改任何已有字段）：\n"
+        "- 必须输出 replan_rationale_summary 与 replan_evidence_ids。\n"
+        "- 若 replan_needed=false：replan_rationale_summary 用一句话说明无需重计划，replan_evidence_ids=[]。\n"
+        "- 不得修改已有字段或其内容。"
+    )
+
+
+def _prompt_addon_node_d(lang: str) -> str:
+    if lang == "en":
+        return (
+            "ADDON (DO NOT CHANGE ANY EXISTING FIELDS):\n"
+            "- For next_steps items, include a short reason field (non-empty).\n"
+            "- Reasons should reference replan summary or highlights when possible.\n"
+            "- Do NOT modify existing keys or their content."
+        )
+    return (
+        "ADDON（不得修改任何已有字段）：\n"
+        "- next_steps 每条追加 reason（不为空）。\n"
+        "- reason 尽量引用重规划摘要或 highlights。\n"
+        "- 不得修改已有字段或其内容。"
+    )
+
 def _build_prompt_node_d(node_a, node_b, node_c, progress_signals, lang) -> str:
     schema = (
-        '{"progress_summary":str,"highlights":[{"text":str,"evidence_ids":[int]}],'
-        '"progress_gap":str,"remaining_work":[{"text":str,"priority":int,"evidence_ids":[int]}],'
-        '"next_steps":[{"text":str,"evidence_ids":[int]}],"to_improve":[str],"assumptions":[str],'
-        '"ask_back":str,"notice":str,'
+        '{"progress_summary":str,"highlights":[{"text":str,"evidence_ids":[int],"confidence":"High|Med|Low","needs_confirmation":bool}],'
+        '"progress_gap":{"text":str,"evidence_ids":[int],"confidence":"High|Med|Low","needs_confirmation":bool},'
+        '"remaining_work":[{"text":str,"priority":int,"evidence_ids":[int],"confidence":"High|Med|Low","needs_confirmation":bool}],'
+        '"next_steps":[{"text":str,"reason":str,"evidence_ids":[int],"confidence":"High|Med|Low","needs_confirmation":bool}],'
+        '"replan":{"needed":bool,"summary":str,"why":str,"confidence":"High|Med|Low","evidence_ids":[int]},'
+        '"to_improve":[str],"assumptions":[str],"ask_back":str,"notice":str,'
+        '"trust_summary":{"coverage_rate":0.0,"overall_confidence":"High|Med|Low","low_confidence_claims_count":int,'
+        '"evidence_pool_size":int,"conflicts_detected":int,"broken_evidence_id_count":int},'
         '"metrics":{"coverage":0.0,"alignment":0.0,"confidence":0.0,'
         '"progress_pct":0.0,'
         '"window_start":str,"window_end":str,"generator_mode":"llm_progress_replan"}}'
@@ -432,6 +526,14 @@ def _build_prompt_node_d(node_a, node_b, node_c, progress_signals, lang) -> str:
             "NEXT_STEPS:\n"
             "- Concrete actions for the next 7 days.\n"
             "- At most node_c.max_next_steps items.\n"
+            "- Avoid suggesting steps already tagged as accepted/completed/rejected; if tags include snooze_until=YYYY-MM-DD, do not suggest the same step before that date.\n"
+            "- Each item MUST include a short reason (non-empty).\n"
+            "- Reason must reference either replan rationale/constraints or highlights; avoid empty filler.\n"
+            "\n"
+            "REPLAN:\n"
+            "- If node_c.replan_needed=true, output replan with summary/why/confidence/evidence_ids.\n"
+            "- replan.summary should include intent + timebox + deliverables.\n"
+            "- replan.why should be a one-line reason grounded in node_c.\n"
             "- Wrap feature/function nouns with 『』 when relevant.\n"
             "\n"
             "METRICS:\n"
@@ -487,6 +589,14 @@ def _build_prompt_node_d(node_a, node_b, node_c, progress_signals, lang) -> str:
         "next_steps：\n"
         "- 面向未来 7 天的具体动作。\n"
         "- 最多 node_c.max_next_steps 条。\n"
+        "- 如有 accepted/completed/rejected 等标签的步骤?不要再提供?如 tags 含 snooze_until=YYYY-MM-DD?该步骤在该日期之前不要再提供?\n"
+        "- 每条必须包含 reason（不为空）。\n"
+        "- reason 必须引用 replan 的依赖/约束/缺口，或引用 highlights（至少一种）。\n"
+        "\n"
+        "REPLAN：\n"
+        "- 若 node_c.replan_needed=true，必须输出 replan（summary/why/confidence/evidence_ids）。\n"
+        "- replan.summary 需包含意图 + 时间盒 + 交付物。\n"
+        "- replan.why 为一句话，需与 node_c 决策一致。\n"
         "- 功能/模块名词尽量用『』包起来。\n"
         "\n"
         "metrics：\n"
@@ -527,20 +637,32 @@ def _validate_node_c(data: Dict[str, Any]) -> bool:
         and isinstance(data.get("replan_needed"), bool)
         and isinstance(data.get("replan_reason"), str)
         and isinstance(data.get("replan_instructions"), list)
+        and isinstance(data.get("replan_rationale_summary"), str)
+        and isinstance(data.get("replan_evidence_ids"), list)
         and isinstance(data.get("max_next_steps"), int)
     )
 
 
 def _validate_node_d(data: Dict[str, Any]) -> bool:
+    progress_gap = data.get("progress_gap")
+    progress_gap_ok = isinstance(progress_gap, str) or (
+        isinstance(progress_gap, dict) and isinstance(progress_gap.get("text"), str)
+    )
+    trust_summary = data.get("trust_summary")
+    trust_summary_ok = trust_summary is None or isinstance(trust_summary, dict)
+    replan = data.get("replan")
+    replan_ok = replan is None or isinstance(replan, dict)
     return bool(
         isinstance(data.get("progress_summary"), str)
         and isinstance(data.get("highlights"), list)
-        and isinstance(data.get("progress_gap"), str)
+        and progress_gap_ok
         and isinstance(data.get("remaining_work"), list)
         and isinstance(data.get("next_steps"), list)
         and isinstance(data.get("to_improve"), list)
         and isinstance(data.get("assumptions"), list)
         and isinstance(data.get("metrics"), dict)
+        and trust_summary_ok
+        and replan_ok
     )
 
 
@@ -652,6 +774,8 @@ def _fallback_node_c(node_a: Dict[str, Any], node_b: Dict[str, Any]) -> Dict[str
         "replan_needed": False,
         "replan_reason": "Evidence is limited; keep scope small.",
         "replan_instructions": [],
+        "replan_rationale_summary": "",
+        "replan_evidence_ids": [],
         "max_next_steps": 1,
         "confidence": 0.4,
         "alignment": 0.3,
@@ -672,10 +796,22 @@ def _fallback_node_d(
     alignment = float(node_c.get("alignment") or 0.0)
     if lang == "en":
         summary = "Recent activity suggests small but real progress."
-        next_steps = [{"text": "Pick one smallest task you can finish today.", "evidence_ids": []}]
+        next_steps = [
+            {
+                "text": "Pick one smallest task you can finish today.",
+                "reason": "Keep the scope tight and create a quick win.",
+                "evidence_ids": [],
+            }
+        ]
     else:
         summary = "近期行动显示已有小幅推进。"
-        next_steps = [{"text": "选一个今天就能完成的小任务。", "evidence_ids": []}]
+        next_steps = [
+            {
+                "text": "选一个今天就能完成的小任务。",
+                "reason": "先做最小可完成任务，建立推进节奏。",
+                "evidence_ids": [],
+            }
+        ]
     max_steps = int(node_c.get("max_next_steps") or 1)
     next_steps = next_steps[:max_steps]
     highlights = []
@@ -702,7 +838,12 @@ def _fallback_node_d(
     return {
         "progress_summary": summary,
         "highlights": highlights,
-        "progress_gap": "Evidence shows partial progress; most deliverables remain.",
+        "progress_gap": {
+            "text": "Evidence shows partial progress; most deliverables remain.",
+            "evidence_ids": [],
+            "confidence": "Low",
+            "needs_confirmation": True,
+        },
         "remaining_work": remaining_work[:5],
         "next_steps": next_steps,
         "to_improve": [],
@@ -719,6 +860,601 @@ def _fallback_node_d(
             "generator_mode": "llm_progress_replan",
         },
     }
+
+
+def _normalize_confidence(value: Any, has_evidence: bool) -> str:
+    if isinstance(value, (int, float)):
+        score = float(value)
+        if score >= 0.66:
+            return "High"
+        if score >= 0.33:
+            return "Med"
+        return "Low"
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"high", "h"}:
+            return "High"
+        if lowered in {"med", "medium", "m"}:
+            return "Med"
+        if lowered in {"low", "l"}:
+            return "Low"
+    return "Med" if has_evidence else "Low"
+
+
+def _normalize_claim_item(
+    item: Any, evidence_pool_ids: set[int]
+) -> tuple[Dict[str, Any], int, bool]:
+    if isinstance(item, dict):
+        text = str(item.get("text") or "")
+        reason = str(item.get("reason") or "")
+        evidence_ids_raw = item.get("evidence_ids")
+        if isinstance(evidence_ids_raw, list):
+            evidence_ids = []
+            for val in evidence_ids_raw:
+                if isinstance(val, int):
+                    evidence_ids.append(val)
+                elif isinstance(val, str) and val.isdigit():
+                    evidence_ids.append(int(val))
+        else:
+            evidence_ids = []
+        valid_ids = [eid for eid in evidence_ids if eid in evidence_pool_ids]
+        broken_count = len(evidence_ids) - len(valid_ids)
+        has_evidence = bool(valid_ids)
+        confidence = _normalize_confidence(item.get("confidence"), has_evidence)
+        needs_confirmation = bool(item.get("needs_confirmation")) or not has_evidence
+        if broken_count > 0:
+            confidence = "Low"
+            needs_confirmation = True
+        normalized = dict(item)
+        normalized["text"] = text
+        if "reason" in item:
+            normalized["reason"] = reason
+        normalized["evidence_ids"] = valid_ids
+        normalized["confidence"] = confidence
+        normalized["needs_confirmation"] = needs_confirmation
+        return normalized, broken_count, has_evidence
+    text = str(item or "")
+    normalized = {
+        "text": text,
+        "evidence_ids": [],
+        "confidence": "Low",
+        "needs_confirmation": True,
+    }
+    return normalized, 0, False
+
+
+def _normalize_claim_list(
+    items: Iterable[Any], evidence_pool_ids: set[int]
+) -> tuple[List[Dict[str, Any]], int, int, int, int]:
+    normalized: List[Dict[str, Any]] = []
+    broken_total = 0
+    total_claims = 0
+    claims_with_evidence = 0
+    claims_needing_confirmation = 0
+    for item in items:
+        normalized_item, broken_count, has_evidence = _normalize_claim_item(
+            item, evidence_pool_ids
+        )
+        normalized.append(normalized_item)
+        broken_total += broken_count
+        total_claims += 1
+        if has_evidence:
+            claims_with_evidence += 1
+        if normalized_item.get("needs_confirmation"):
+            claims_needing_confirmation += 1
+    return (
+        normalized,
+        broken_total,
+        total_claims,
+        claims_with_evidence,
+        claims_needing_confirmation,
+    )
+
+
+def _is_json_like(text: str) -> bool:
+    if not isinstance(text, str):
+        return False
+    stripped = text.strip()
+    if not stripped:
+        return False
+    if stripped[0] in {"{", "["}:
+        return True
+    try:
+        json.loads(stripped)
+    except Exception:  # noqa: BLE001
+        return False
+    return True
+
+
+def _first_sentences(text: str, max_sentences: int = 2) -> str:
+    cleaned = _normalize_text(text)
+    if not cleaned:
+        return ""
+    parts = re.split(r"([。！？.!?])", cleaned)
+    sentences: List[str] = []
+    current = ""
+    for part in parts:
+        if part in {"。", "！", "？", ".", "!", "?"}:
+            current += part
+            sentences.append(current.strip())
+            current = ""
+        else:
+            current += part
+        if len(sentences) >= max_sentences:
+            break
+    if not sentences and current.strip():
+        sentences.append(current.strip())
+    return " ".join(sentences[:max_sentences])
+
+
+def _summary_from_outline(outline: Any, lang: str) -> str:
+    if not isinstance(outline, list) or not outline:
+        return ""
+    deliverables: List[str] = []
+    for phase in outline:
+        if isinstance(phase, dict):
+            for item in phase.get("deliverables", []) or []:
+                if item:
+                    deliverables.append(str(item))
+    deliverables = deliverables[:2]
+    phase_count = len(outline)
+    if lang == "en":
+        if deliverables:
+            return (
+                f"Plan has {phase_count} phases and focuses on {', '.join(deliverables)}."
+            )
+        return f"Plan has {phase_count} phases with concrete deliverables."
+    if deliverables:
+        return f"计划包含 {phase_count} 个阶段，聚焦交付：{', '.join(deliverables)}。"
+    return f"计划包含 {phase_count} 个阶段，包含可交付成果。"
+
+
+def _coerce_summary_text(
+    summary_text: str, detail_text: str, outline: Any, lang: str
+) -> str:
+    if summary_text and not _is_json_like(summary_text):
+        return summary_text.strip()
+    if detail_text and not _is_json_like(detail_text):
+        return _first_sentences(detail_text, 2)
+    summary = _summary_from_outline(outline, lang)
+    if summary:
+        return summary
+    if detail_text:
+        return _first_sentences(detail_text, 2)
+    return ""
+
+
+def _coerce_detail_text(detail_text: str, outline: Any) -> str:
+    if detail_text and not _is_json_like(detail_text):
+        return detail_text.strip()
+    if isinstance(outline, list) and outline:
+        return json.dumps(outline, ensure_ascii=False, indent=2)
+    return ""
+
+
+def _build_plan_view_v1(
+    node_b_original: Dict[str, Any],
+    node_b_replan: Optional[Dict[str, Any]],
+    node_c: Dict[str, Any],
+    lang: str,
+) -> Dict[str, Any]:
+    origin_outline = node_b_original.get("plan_outline") if isinstance(node_b_original, dict) else []
+    origin_detail = (
+        node_b_original.get("plan_detail_text_v1") if isinstance(node_b_original, dict) else ""
+    )
+    origin_summary = (
+        node_b_original.get("plan_summary_text_v1") if isinstance(node_b_original, dict) else ""
+    )
+    origin_detail = _coerce_detail_text(str(origin_detail or ""), origin_outline)
+    origin_summary = _coerce_summary_text(str(origin_summary or ""), origin_detail, origin_outline, lang)
+
+    replan_outline = node_b_replan.get("plan_outline") if isinstance(node_b_replan, dict) else []
+    replan_detail = (
+        node_b_replan.get("replan_detail_text_v1") if isinstance(node_b_replan, dict) else ""
+    )
+    replan_summary = (
+        node_b_replan.get("replan_summary_text_v1") if isinstance(node_b_replan, dict) else ""
+    )
+    replan_detail = _coerce_detail_text(str(replan_detail or ""), replan_outline)
+    replan_summary = _coerce_summary_text(str(replan_summary or ""), replan_detail, replan_outline, lang)
+
+    replan_available = bool(node_c.get("replan_needed") and (replan_detail or replan_summary or replan_outline))
+    origin_available = bool(origin_detail or origin_summary or origin_outline)
+    current_mode = "replan" if replan_available else "origin"
+
+    return {
+        "current_mode": current_mode,
+        "origin": {
+            "available": origin_available,
+            "summary": origin_summary,
+            "detail": origin_detail,
+        },
+        "replan": {
+            "available": replan_available,
+            "summary": replan_summary,
+            "detail": replan_detail,
+        },
+    }
+
+
+def _normalize_timebox_v1(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    value = value.strip()
+    if re.match(r"^\d+(\.\d+)?[hd]$", value):
+        return value
+    return ""
+
+
+def _normalize_plan_item_v1(
+    item: Any, evidence_pool_ids: set[int]
+) -> tuple[Dict[str, Any], int]:
+    if not isinstance(item, dict):
+        return {
+            "id": 0,
+            "title": str(item or ""),
+            "deliverable": "",
+            "timebox": "",
+            "priority": "P1",
+            "depends_on": [],
+            "evidence_ids": [],
+            "confidence": "Low",
+            "needs_confirmation": True,
+        }, 0
+    title = str(item.get("title") or "").strip()
+    deliverable = str(item.get("deliverable") or "").strip()
+    timebox = _normalize_timebox_v1(item.get("timebox"))
+    priority = str(item.get("priority") or "P1").strip()
+    depends_on = item.get("depends_on")
+    if not isinstance(depends_on, list):
+        depends_on = []
+    evidence_ids_raw = item.get("evidence_ids")
+    evidence_ids = []
+    if isinstance(evidence_ids_raw, list):
+        for val in evidence_ids_raw:
+            if isinstance(val, int):
+                evidence_ids.append(val)
+            elif isinstance(val, str) and val.isdigit():
+                evidence_ids.append(int(val))
+    valid_ids = [eid for eid in evidence_ids if eid in evidence_pool_ids]
+    broken_count = len(evidence_ids) - len(valid_ids)
+    has_evidence = bool(valid_ids)
+    confidence = _normalize_confidence(item.get("confidence"), has_evidence)
+    needs_confirmation = bool(item.get("needs_confirmation")) or not has_evidence
+    if not title or not deliverable or not timebox:
+        confidence = "Low"
+        needs_confirmation = True
+    if broken_count > 0:
+        confidence = "Low"
+        needs_confirmation = True
+    return (
+        {
+            "id": item.get("id") or 0,
+            "title": title,
+            "deliverable": deliverable,
+            "timebox": timebox,
+            "priority": "P0" if priority == "P0" else "P1",
+            "depends_on": depends_on,
+            "evidence_ids": valid_ids,
+            "confidence": confidence,
+            "needs_confirmation": needs_confirmation,
+        },
+        broken_count,
+    )
+
+
+def _normalize_plan_items_v1(
+    items: Any, evidence_pool_ids: set[int]
+) -> tuple[List[Dict[str, Any]], int]:
+    if not isinstance(items, list):
+        return [], 0
+    normalized: List[Dict[str, Any]] = []
+    broken_total = 0
+    for item in items:
+        normalized_item, broken = _normalize_plan_item_v1(item, evidence_pool_ids)
+        normalized.append(normalized_item)
+        broken_total += broken
+    return normalized, broken_total
+
+
+def _build_analysis_plan_v1(
+    node_a: Dict[str, Any],
+    node_b_original: Dict[str, Any],
+    node_b_replan: Optional[Dict[str, Any]],
+    node_c: Dict[str, Any],
+    lang: str,
+) -> tuple[Dict[str, Any], int]:
+    evidence_pool = node_a.get("evidence") or []
+    evidence_pool_ids: set[int] = set()
+    for item in evidence_pool:
+        raw_id = item.get("id")
+        if isinstance(raw_id, int):
+            evidence_pool_ids.add(raw_id)
+        elif isinstance(raw_id, str) and raw_id.isdigit():
+            evidence_pool_ids.add(int(raw_id))
+
+    original_items_raw = (
+        node_b_original.get("plan_items_v1") if isinstance(node_b_original, dict) else []
+    )
+    original_items, broken_original = _normalize_plan_items_v1(
+        original_items_raw, evidence_pool_ids
+    )
+    original_summary = (
+        str(node_b_original.get("plan_summary_v1") or "").strip()
+        if isinstance(node_b_original, dict)
+        else ""
+    )
+    original_available = bool(original_items)
+
+    replan_items_raw = (
+        node_b_replan.get("replan_plan_items_v1")
+        if isinstance(node_b_replan, dict)
+        else []
+    )
+    replan_items, broken_replan = _normalize_plan_items_v1(
+        replan_items_raw, evidence_pool_ids
+    )
+    replan_summary = (
+        str(node_b_replan.get("replan_plan_summary_v1") or "").strip()
+        if isinstance(node_b_replan, dict)
+        else ""
+    )
+    replan_available = bool(node_c.get("replan_needed") and replan_items)
+
+    diff_summary = (
+        node_b_replan.get("diff_summary_v1") if isinstance(node_b_replan, dict) else None
+    )
+    if not isinstance(diff_summary, dict):
+        original_titles = {item.get("title") for item in original_items if item.get("title")}
+        replan_titles = {item.get("title") for item in replan_items if item.get("title")}
+        diff_summary = {
+            "added_count": max(len(replan_titles - original_titles), 0),
+            "removed_count": max(len(original_titles - replan_titles), 0),
+            "changed_count": 0,
+        }
+
+    plan = {
+        "replan": {
+            "available": replan_available,
+            "items": replan_items,
+            "summary": replan_summary,
+        },
+        "original": {
+            "available": original_available,
+            "items": original_items,
+            "summary": original_summary,
+        },
+        "diff_summary": diff_summary,
+    }
+    broken_total = broken_original + broken_replan
+    return plan, broken_total
+
+
+def _derive_next_steps_v1(
+    plan_items: List[Dict[str, Any]],
+    highlights: List[Dict[str, Any]],
+    max_steps: int,
+    plan_summary: str,
+    lang: str,
+) -> List[Dict[str, Any]]:
+    highlight_texts = [
+        str(item.get("text") or "").lower() for item in highlights if isinstance(item, dict)
+    ]
+    def _already_done(item: Dict[str, Any]) -> bool:
+        title = (item.get("title") or "").lower()
+        deliverable = (item.get("deliverable") or "").lower()
+        for text in highlight_texts:
+            if title and title in text:
+                return True
+            if deliverable and deliverable in text:
+                return True
+        return False
+
+    candidates = [item for item in plan_items if not item.get("depends_on")]
+    if not candidates:
+        candidates = plan_items[:]
+    ordered = sorted(
+        candidates,
+        key=lambda item: (0 if item.get("priority") == "P0" else 1),
+    )
+    steps: List[Dict[str, Any]] = []
+    for item in ordered:
+        if _already_done(item):
+            continue
+        reason_base = plan_summary or (
+            "Based on replanned deliverables." if lang == "en" else "基于重规划交付物。"
+        )
+        reason = (
+            f"{reason_base} Focus on {item.get('deliverable')}."
+            if lang == "en"
+            else f"{reason_base} 优先交付「{item.get('deliverable')}」。"
+        )
+        steps.append(
+            {
+                "text": item.get("title") or "",
+                "reason": reason,
+                "evidence_ids": item.get("evidence_ids") or [],
+                "confidence": item.get("confidence") or "Low",
+                "needs_confirmation": item.get("needs_confirmation", True),
+            }
+        )
+        if len(steps) >= max_steps:
+            break
+    return steps[:max_steps]
+
+
+def _build_replan_summary(
+    node_b: Dict[str, Any], progress_signals: Dict[str, Any], lang: str
+) -> str:
+    plan_outline = node_b.get("plan_outline") or []
+    deliverables: List[str] = []
+    for phase in plan_outline:
+        for deliverable in phase.get("deliverables", []) or []:
+            if deliverable:
+                deliverables.append(str(deliverable))
+    deliverables = deliverables[:3]
+    window_days = int(progress_signals.get("window_days") or 7)
+    if lang == "en":
+        if deliverables:
+            return (
+                f"Focus the next {window_days} days on {len(deliverables)} deliverables: "
+                + ", ".join(deliverables)
+                + "."
+            )
+        return f"Focus the next {window_days} days on one core, shippable outcome."
+    if deliverables:
+        return f"未来 {window_days} 天聚焦 {len(deliverables)} 个交付物：{', '.join(deliverables)}。"
+    return f"未来 {window_days} 天聚焦一个核心可交付成果。"
+
+
+def _normalize_replan(
+    node_d: Dict[str, Any],
+    node_b: Dict[str, Any],
+    node_c: Dict[str, Any],
+    progress_signals: Dict[str, Any],
+    evidence_pool_ids: set[int],
+    lang: str,
+) -> tuple[Dict[str, Any], int]:
+    replan = node_d.get("replan")
+    if not isinstance(replan, dict):
+        replan = {}
+    needed = bool(replan.get("needed") or node_c.get("replan_needed"))
+    summary = str(replan.get("summary") or "").strip()
+    why = str(replan.get("why") or "").strip()
+    confidence = _normalize_confidence(replan.get("confidence"), False)
+    evidence_ids_raw = replan.get("evidence_ids")
+    if isinstance(evidence_ids_raw, list):
+        evidence_ids = []
+        for val in evidence_ids_raw:
+            if isinstance(val, int):
+                evidence_ids.append(val)
+            elif isinstance(val, str) and val.isdigit():
+                evidence_ids.append(int(val))
+    else:
+        evidence_ids = []
+    if not evidence_ids and isinstance(node_c.get("replan_evidence_ids"), list):
+        for val in node_c.get("replan_evidence_ids"):
+            if isinstance(val, int):
+                evidence_ids.append(val)
+            elif isinstance(val, str) and val.isdigit():
+                evidence_ids.append(int(val))
+    valid_ids = [eid for eid in evidence_ids if eid in evidence_pool_ids]
+    broken_count = len(evidence_ids) - len(valid_ids)
+    if broken_count > 0:
+        confidence = "Low"
+    if needed and not summary:
+        summary = _build_replan_summary(node_b, progress_signals, lang)
+    if needed and not why:
+        why = (
+            str(node_c.get("replan_rationale_summary") or "").strip()
+            or str(node_c.get("replan_reason") or "").strip()
+            or str(node_c.get("reason") or "").strip()
+        )
+    if not confidence:
+        confidence = "Med" if valid_ids else "Low"
+    node_d["replan"] = {
+        "needed": needed,
+        "summary": summary,
+        "why": why,
+        "confidence": confidence,
+        "evidence_ids": valid_ids,
+    }
+    return node_d["replan"], broken_count
+
+
+def _ensure_next_step_reasons(
+    node_d: Dict[str, Any], node_c: Dict[str, Any], lang: str
+) -> None:
+    reason = (
+        str(node_c.get("replan_rationale_summary") or "").strip()
+        or str(node_c.get("replan_reason") or "").strip()
+        or str(node_c.get("reason") or "").strip()
+    )
+    if not reason:
+        reason = (
+            "Based on recent highlights, take the next concrete step."
+            if lang == "en"
+            else "基于近期亮点，推进下一步具体动作。"
+        )
+    next_steps = node_d.get("next_steps") or []
+    for item in next_steps:
+        if isinstance(item, dict):
+            item_reason = str(item.get("reason") or "").strip()
+            if not item_reason:
+                item["reason"] = reason
+
+
+def _apply_trust_summary(
+    node_d: Dict[str, Any],
+    node_a: Dict[str, Any],
+    node_b: Dict[str, Any],
+    node_c: Dict[str, Any],
+    progress_signals: Dict[str, Any],
+    lang: str,
+) -> Dict[str, Any]:
+    evidence_pool = node_a.get("evidence") or []
+    evidence_pool_ids: set[int] = set()
+    for item in evidence_pool:
+        raw_id = item.get("id")
+        if isinstance(raw_id, int):
+            evidence_pool_ids.add(raw_id)
+        elif isinstance(raw_id, str) and raw_id.isdigit():
+            evidence_pool_ids.add(int(raw_id))
+    highlights, broken_h, total_h, covered_h, needs_h = _normalize_claim_list(
+        node_d.get("highlights") or [], evidence_pool_ids
+    )
+    next_steps, broken_n, total_n, covered_n, needs_n = _normalize_claim_list(
+        node_d.get("next_steps") or [], evidence_pool_ids
+    )
+    remaining_work, broken_r, total_r, covered_r, needs_r = _normalize_claim_list(
+        node_d.get("remaining_work") or [], evidence_pool_ids
+    )
+    progress_gap_raw = node_d.get("progress_gap")
+    progress_gap_claim = None
+    broken_g = 0
+    total_g = 0
+    covered_g = 0
+    needs_g = 0
+    if progress_gap_raw is not None:
+        if isinstance(progress_gap_raw, dict) or isinstance(progress_gap_raw, str):
+            progress_gap_claim, broken_g, total_g, covered_g, needs_g = _normalize_claim_list(
+                [progress_gap_raw], evidence_pool_ids
+            )
+            progress_gap_claim = progress_gap_claim[0]
+    node_d["highlights"] = highlights
+    node_d["next_steps"] = next_steps
+    node_d["remaining_work"] = remaining_work
+    if progress_gap_claim:
+        node_d["progress_gap"] = progress_gap_claim
+
+    total_claims = total_h + total_n + total_r + total_g
+    covered_claims = covered_h + covered_n + covered_r + covered_g
+    coverage_rate = covered_claims / total_claims if total_claims else 0.0
+    low_confidence_claims_count = needs_h + needs_n + needs_r
+    if progress_gap_claim:
+        if progress_gap_claim.get("needs_confirmation"):
+            low_confidence_claims_count += 1
+
+    replan, broken_replan = _normalize_replan(
+        node_d, node_b, node_c, progress_signals, evidence_pool_ids, lang
+    )
+    broken_evidence_id_count = broken_h + broken_n + broken_r + broken_g + broken_replan
+    if coverage_rate >= 0.7 and low_confidence_claims_count == 0:
+        overall_confidence = "High"
+    elif coverage_rate >= 0.4 and low_confidence_claims_count <= max(1, total_claims // 3):
+        overall_confidence = "Med"
+    else:
+        overall_confidence = "Low"
+
+    node_d["trust_summary"] = {
+        "coverage_rate": coverage_rate,
+        "overall_confidence": overall_confidence,
+        "low_confidence_claims_count": low_confidence_claims_count,
+        "evidence_pool_size": len(evidence_pool),
+        "conflicts_detected": 0,
+        "broken_evidence_id_count": broken_evidence_id_count,
+    }
+    return node_d
 
 
 def _apply_gate(node_c: Dict[str, Any], node_a: Dict[str, Any]) -> None:
@@ -756,6 +1492,7 @@ def _node_b(
     payload: Dict[str, Any], model_key: str, api_key: str, lang: str
 ) -> tuple[Dict[str, Any], Dict[str, Any]]:
     prompt = _build_prompt_node_b(payload, lang)
+    prompt = f"{prompt}\n\n{_prompt_addon_node_b(payload, lang)}"
     parsed, error = _llm_json(model_key, api_key, prompt, lang)
     if parsed and _validate_node_b(parsed):
         return parsed, {"mode": "llm"}
@@ -771,6 +1508,7 @@ def _node_b_replan(
     lang: str,
 ) -> tuple[Dict[str, Any], Dict[str, Any]]:
     prompt = _build_prompt_node_b_replan(payload, node_c, progress_signals, lang)
+    prompt = f"{prompt}\n\n{_prompt_addon_node_b_replan(payload, lang)}"
     parsed, error = _llm_json(model_key, api_key, prompt, lang)
     if parsed and _validate_node_b(parsed):
         return parsed, {"mode": "llm_replan"}
@@ -786,6 +1524,7 @@ def _node_c(
     lang: str,
 ) -> tuple[Dict[str, Any], Dict[str, Any]]:
     prompt = _build_prompt_node_c(node_a, node_b, progress_signals, lang)
+    prompt = f"{prompt}\n\n{_prompt_addon_node_c(lang)}"
     parsed, error = _llm_json(model_key, api_key, prompt, lang)
     if parsed and _validate_node_c(parsed):
         return parsed, {"mode": "llm"}
@@ -795,6 +1534,8 @@ def _node_c(
 def _node_d(
     node_a: Dict[str, Any],
     node_b: Dict[str, Any],
+    node_b_original: Dict[str, Any],
+    node_b_replan: Optional[Dict[str, Any]],
     node_c: Dict[str, Any],
     progress_signals: Dict[str, Any],
     model_key: str,
@@ -802,13 +1543,14 @@ def _node_d(
     lang: str,
 ) -> tuple[Dict[str, Any], Dict[str, Any]]:
     prompt = _build_prompt_node_d(node_a, node_b, node_c, progress_signals, lang)
+    prompt = f"{prompt}\n\n{_prompt_addon_node_d(lang)}"
     parsed, error = _llm_json(model_key, api_key, prompt, lang)
     if parsed and _validate_node_d(parsed):
         greeting = "Good morning, " if lang == "en" else "\u65e9\u4e0a\u597d\uff0c"
         summary = parsed.get("progress_summary") or ""
         if not summary.startswith(greeting):
             parsed["progress_summary"] = f"{greeting}{summary}".strip()
-        max_steps = int(node_c.get("max_next_steps") or 3)
+        max_steps = min(5, max(3, int(node_c.get("max_next_steps") or 3)))
         raw_steps = parsed.get("next_steps") or []
         normalized_steps = []
         for item in raw_steps:
@@ -818,10 +1560,28 @@ def _node_d(
                     evidence_ids = item.get("evidence_ids")
                     if not isinstance(evidence_ids, list):
                         evidence_ids = []
-                    normalized_steps.append({"text": str(text), "evidence_ids": evidence_ids})
+                    reason = item.get("reason") or ""
+                    normalized_steps.append(
+                        {
+                            "text": str(text),
+                            "reason": str(reason),
+                            "evidence_ids": evidence_ids,
+                            "confidence": item.get("confidence"),
+                            "needs_confirmation": item.get("needs_confirmation"),
+                        }
+                    )
             elif item is not None:
-                normalized_steps.append({"text": str(item), "evidence_ids": []})
+                normalized_steps.append(
+                    {
+                        "text": str(item),
+                        "reason": "",
+                        "evidence_ids": [],
+                        "confidence": "Low",
+                        "needs_confirmation": True,
+                    }
+                )
         parsed["next_steps"] = normalized_steps[:max_steps]
+        _ensure_next_step_reasons(parsed, node_c, lang)
         remaining_work = parsed.get("remaining_work") or []
         while len(remaining_work) < 5:
             remaining_work.append(
@@ -842,12 +1602,73 @@ def _node_d(
             if not assumptions:
                 assumptions = [node_c.get("replan_reason") or "Triggered re-plan based on evidence."]
             parsed["assumptions"] = assumptions
+        parsed = _apply_trust_summary(parsed, node_a, node_b, node_c, progress_signals, lang)
+        plan_v1, broken_plan = _build_analysis_plan_v1(
+            node_a, node_b_original, node_b_replan, node_c, lang
+        )
+        parsed["plan"] = plan_v1
+        max_steps = min(5, max(3, int(node_c.get("max_next_steps") or 3)))
+        plan_items = (
+            plan_v1.get("replan", {}).get("items")
+            if plan_v1.get("replan", {}).get("available")
+            else plan_v1.get("original", {}).get("items")
+        )
+        plan_summary = (
+            plan_v1.get("replan", {}).get("summary")
+            if plan_v1.get("replan", {}).get("available")
+            else plan_v1.get("original", {}).get("summary")
+        )
+        if plan_items:
+            parsed["next_steps"] = _derive_next_steps_v1(
+                plan_items, parsed.get("highlights") or [], max_steps, plan_summary, lang
+            )
+            _ensure_next_step_reasons(parsed, node_c, lang)
+        parsed["plan_view"] = _build_plan_view_v1(
+            node_b_original, node_b_replan, node_c, lang
+        )
+        trust = parsed.get("trust_summary") or {}
+        if isinstance(trust, dict):
+            trust["broken_evidence_id_count"] = int(
+                trust.get("broken_evidence_id_count") or 0
+            ) + broken_plan
+            parsed["trust_summary"] = trust
         return parsed, {"mode": "llm"}
-    return _fallback_node_d(
+    fallback = _fallback_node_d(
         {"window": (node_a.get("coverage") or {}).get("window", {})},
         node_a,
         node_b,
         node_c,
         progress_signals,
         lang,
-    ), {"mode": "fallback", "error": error}
+    )
+    fallback = _apply_trust_summary(fallback, node_a, node_b, node_c, progress_signals, lang)
+    plan_v1, broken_plan = _build_analysis_plan_v1(
+        node_a, node_b_original, node_b_replan, node_c, lang
+    )
+    fallback["plan"] = plan_v1
+    max_steps = min(5, max(3, int(node_c.get("max_next_steps") or 3)))
+    plan_items = (
+        plan_v1.get("replan", {}).get("items")
+        if plan_v1.get("replan", {}).get("available")
+        else plan_v1.get("original", {}).get("items")
+    )
+    plan_summary = (
+        plan_v1.get("replan", {}).get("summary")
+        if plan_v1.get("replan", {}).get("available")
+        else plan_v1.get("original", {}).get("summary")
+    )
+    if plan_items:
+        fallback["next_steps"] = _derive_next_steps_v1(
+            plan_items, fallback.get("highlights") or [], max_steps, plan_summary, lang
+        )
+        _ensure_next_step_reasons(fallback, node_c, lang)
+    fallback["plan_view"] = _build_plan_view_v1(
+        node_b_original, node_b_replan, node_c, lang
+    )
+    trust = fallback.get("trust_summary") or {}
+    if isinstance(trust, dict):
+        trust["broken_evidence_id_count"] = int(
+            trust.get("broken_evidence_id_count") or 0
+        ) + broken_plan
+        fallback["trust_summary"] = trust
+    return fallback, {"mode": "fallback", "error": error}

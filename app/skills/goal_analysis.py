@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
-from datetime import date, datetime
+import re
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
@@ -19,6 +21,7 @@ from app.domain.models import (
     PlanItem,
     ShortTermObjective,
     Suggestion,
+    NextStepFeedback,
 )
 
 logger = logging.getLogger(__name__)
@@ -85,6 +88,16 @@ class GoalAnalysisSkill(Skill):
             if item.linked_goal_id == goal.id
             or (item.linked_objective_id in objective_ids)
         ]
+        feedback_start = goal.created_at.date() if goal.created_at else window_start
+        feedback_start_dt = datetime.combine(feedback_start, datetime.min.time())
+        feedback_end_dt = datetime.combine(data.as_of, datetime.max.time())
+        next_step_feedback = session.exec(
+            select(NextStepFeedback).where(
+                NextStepFeedback.goal_id == goal.id,
+                NextStepFeedback.created_at >= feedback_start_dt,
+                NextStepFeedback.created_at <= feedback_end_dt,
+            )
+        ).all()
 
         payload = _build_payload(
             goal=goal,
@@ -93,6 +106,7 @@ class GoalAnalysisSkill(Skill):
             logs=logs,
             plan_items=goal_items,
             plan_by_id=plan_by_id,
+            next_step_feedback=next_step_feedback,
             window_start=window_start,
             window_end=window_end,
             window_days=window_days,
@@ -122,6 +136,7 @@ class GoalAnalysisSkill(Skill):
         if data.trigger == "manual_regenerate":
             metrics["regenerated_at"] = datetime.utcnow().isoformat()
         output["metrics"] = metrics
+        _apply_next_step_keys_and_filter(session, goal.id, output)
 
         suggestion = None
         if data.existing_id:
@@ -144,6 +159,97 @@ class GoalAnalysisSkill(Skill):
             session.commit()
 
         return GoalAnalysisOutput(**output)
+
+
+def _normalize_step_text(text: str) -> str:
+    cleaned = (text or "").lower().strip()
+    cleaned = re.sub(r"[^\w\s]", "", cleaned)
+    cleaned = " ".join(cleaned.split())
+    return cleaned
+
+
+def _step_key(goal_id: int, step_text: str) -> str:
+    normalized = _normalize_step_text(step_text)
+    payload = f"{goal_id}:{normalized}".encode("utf-8")
+    return hashlib.sha1(payload).hexdigest()
+
+
+def _apply_next_step_keys_and_filter(
+    session: Session, goal_id: int, output: Dict[str, Any]
+) -> None:
+    steps = output.get("next_steps") or []
+    if not isinstance(steps, list):
+        return
+    filtered_steps = []
+    for item in steps:
+        if isinstance(item, dict):
+            text = str(item.get("text") or "").strip()
+            if text:
+                item["step_key"] = _step_key(goal_id, text)
+            filtered_steps.append(item)
+        else:
+            filtered_steps.append(item)
+    output["next_steps"] = filtered_steps
+
+    step_keys = [
+        item.get("step_key")
+        for item in filtered_steps
+        if isinstance(item, dict) and item.get("step_key")
+    ]
+    if not step_keys:
+        output["next_steps_filtered_count"] = 0
+        return
+
+    now = datetime.utcnow()
+    permanent_reasons = {"completed", "not_needed"}
+    ttl_days = {
+        "inaccurate": 30,
+        "deprioritized": 14,
+        "has_alternative": 30,
+        "other": 30,
+    }
+
+    feedback = session.exec(
+        select(NextStepFeedback)
+        .where(
+            NextStepFeedback.goal_id == goal_id,
+            NextStepFeedback.step_key.in_(step_keys),
+        )
+        .order_by(NextStepFeedback.created_at.desc())
+    ).all()
+
+    latest_by_key: Dict[str, NextStepFeedback] = {}
+    for fb in feedback:
+        if fb.step_key not in latest_by_key:
+            latest_by_key[fb.step_key] = fb
+
+    filtered = []
+    for item in filtered_steps:
+        if not isinstance(item, dict) or not item.get("step_key"):
+            filtered.append(item)
+            continue
+        step_key = item["step_key"]
+        fb = latest_by_key.get(step_key)
+        exclude = False
+        if fb:
+            action = fb.action
+            reason = fb.reason
+            if action in ("accepted", "completed"):
+                exclude = True
+            elif action in ("rejected", "dismissed"):
+                if reason in permanent_reasons:
+                    exclude = True
+                else:
+                    ttl = ttl_days.get(reason)
+                    if ttl is not None and now - fb.created_at < timedelta(days=ttl):
+                        exclude = True
+            elif action == "delayed":
+                if fb.snooze_until and now < fb.snooze_until:
+                    exclude = True
+        if not exclude:
+            filtered.append(item)
+    output["next_steps_filtered_count"] = len(filtered_steps) - len(filtered)
+    output["next_steps"] = filtered
 
 
 def _goal_window(goal: Goal, as_of: date) -> tuple[date, date, int]:
@@ -174,6 +280,32 @@ def _serialize_plan_item(item: PlanItem, plan_date: Optional[date]) -> Dict[str,
     }
 
 
+def _serialize_next_step_feedback(
+    feedback: NextStepFeedback,
+) -> Dict[str, Any]:
+    step_text = (feedback.step_text_snapshot or "").strip()
+    return {
+        "id": feedback.id,
+        "suggestion_id": feedback.suggestion_id,
+        "step_key": feedback.step_key,
+        "step_text": step_text,
+        "evidence_text": f"（{feedback.action}：{step_text}）",
+        "action": feedback.action,
+        "reason": feedback.reason,
+        "reason_detail": feedback.reason_detail or "",
+        "completion_note": feedback.completion_note or "",
+        "snooze_until": feedback.snooze_until.isoformat()
+        if feedback.snooze_until
+        else "",
+        "user_due_date": feedback.user_due_date.isoformat()
+        if feedback.user_due_date
+        else "",
+        "created_short_term_objective_id": feedback.created_short_term_objective_id,
+        "created_plan_item_id": feedback.created_plan_item_id,
+        "created_at": feedback.created_at.isoformat() if feedback.created_at else "",
+    }
+
+
 def _build_payload(
     goal: Goal,
     milestones: List[Milestone],
@@ -181,6 +313,7 @@ def _build_payload(
     logs: List[DayLog],
     plan_items: List[PlanItem],
     plan_by_id: Dict[int, date],
+    next_step_feedback: List[NextStepFeedback],
     window_start: date,
     window_end: date,
     window_days: int,
@@ -189,6 +322,9 @@ def _build_payload(
     logs_payload = [_serialize_log(log) for log in logs]
     plan_items_payload = [
         _serialize_plan_item(item, plan_by_id.get(item.daily_plan_id)) for item in plan_items
+    ]
+    next_step_feedback_payload = [
+        _serialize_next_step_feedback(feedback) for feedback in next_step_feedback
     ]
     objectives_payload = [
         {
@@ -285,6 +421,7 @@ def _build_payload(
         "short_term_objectives": objectives_payload,
         "recent_logs": logs_payload,
         "recent_plan_items": plan_items_payload,
+        "recent_next_step_feedback": next_step_feedback_payload,
         "recent_habits": [],
         "window": {
             "start": window_start.isoformat(),
@@ -302,6 +439,7 @@ def _run_rules_graph(
     result = graph.run(payload, model_key, api_key)
     output = result.get("output", {})
     node_a = result.get("node_a", {})
+    _apply_next_step_feedback_evidence(node_a, payload)
     related_events = node_a.get("related_events") or []
     evidence_quotes = [
         {
@@ -331,6 +469,47 @@ def _run_rules_graph(
     output["evidence"] = {"matched_evidence": matched_evidence}
     output["plan"] = result.get("node_b", {})
     return output
+
+
+def _apply_next_step_feedback_evidence(
+    node_a: Dict[str, Any], payload: Dict[str, Any]
+) -> None:
+    evidence = node_a.get("evidence")
+    if not isinstance(evidence, list):
+        return
+    feedback_items = payload.get("recent_next_step_feedback") or []
+    feedback_by_id = {
+        item.get("id"): item
+        for item in feedback_items
+        if isinstance(item, dict) and item.get("id") is not None
+    }
+    if not feedback_by_id:
+        return
+    for item in evidence:
+        if not isinstance(item, dict):
+            continue
+        if item.get("source_type") != "next_step_feedback":
+            continue
+        source_id = item.get("source_id")
+        feedback = feedback_by_id.get(source_id)
+        if not feedback:
+            continue
+        evidence_text = feedback.get("evidence_text")
+        if evidence_text:
+            item["quote"] = evidence_text
+        tags = item.get("tags") if isinstance(item.get("tags"), list) else []
+        action = feedback.get("action")
+        if action and action not in tags:
+            tags.append(action)
+        snooze_until = feedback.get("snooze_until") or ""
+        if snooze_until:
+            snooze_date = snooze_until.split("T", 1)[0]
+            snooze_tag = f"snooze_until={snooze_date}"
+            if snooze_tag not in tags:
+                tags.append(snooze_tag)
+        if len(tags) > 3:
+            tags = tags[:3]
+        item["tags"] = tags
 
 
 def get_skill() -> Skill:

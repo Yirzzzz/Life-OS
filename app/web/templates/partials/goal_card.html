@@ -79,62 +79,525 @@
         <div class="mt-2 text-xs text-amber-600">{{ analysis.notice }}</div>
       {% endif %}
       <div class="mt-2 text-sm text-slate-700">{{ analysis.progress_summary }}</div>
+      {# ===== Trust Summary (optional) ===== #}
+      {% if analysis.trust_summary %}
+        {% set trust_summary = analysis.trust_summary %}
+        {% set overall_confidence = trust_summary.overall_confidence if trust_summary.overall_confidence else "Low" %}
+        {% if overall_confidence == "High" %}
+          {% set overall_badge_class = "bg-emerald-100 text-emerald-700" %}
+        {% elif overall_confidence == "Med" %}
+          {% set overall_badge_class = "bg-amber-100 text-amber-800" %}
+        {% else %}
+          {% set overall_badge_class = "bg-rose-100 text-rose-700" %}
+        {% endif %}
+        <div class="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-semibold text-slate-600">Confidence</span>
+              <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {{ overall_badge_class }}">
+                {{ overall_confidence }}
+              </span>
+            </div>
+            <div class="flex flex-wrap gap-3 text-xs text-slate-500">
+              <span>Coverage {{ (trust_summary.coverage_rate * 100) | int }}%</span>
+              <span>Low claims {{ trust_summary.low_confidence_claims_count }}</span>
+              <span>Evidence {{ trust_summary.evidence_pool_size }}</span>
+              <span>Conflicts {{ trust_summary.conflicts_detected }}</span>
+            </div>
+          </div>
+          <div class="mt-2 h-1.5 w-full rounded-full bg-slate-200 overflow-hidden">
+            <div class="h-1.5 bg-slate-500" style="width: {{ (trust_summary.coverage_rate * 100) | int }}%"></div>
+          </div>
+        </div>
+      {% endif %}
+      {# ===== Evidence Pool Map ===== #}
+      {% set evidence_pool = analysis.intent.evidence if analysis.intent and analysis.intent.evidence else [] %}
+      {% set evidence_map = namespace(items={}) %}
+      {% for ev in evidence_pool %}
+        {% if ev.id is not none %}
+          {% set _ = evidence_map.items.update({ev.id: ev}) %}
+        {% endif %}
+      {% endfor %}
+
+      {# ===== Plan Summary ===== #}
+      {% set replan = analysis.replan if analysis.replan else {} %}
+      {% set show_replan = replan.needed or replan.summary or replan.why %}
+      {% set plan_view = analysis.plan_view if analysis.plan_view else {} %}
+      {% set origin_view = plan_view.origin if plan_view.origin else {} %}
+      {% set replan_view = plan_view.replan if plan_view.replan else {} %}
+      {% set origin_available = origin_view.available %}
+      {% set replan_available = replan_view.available %}
+      {% set current_mode = plan_view.current_mode if plan_view.current_mode else ("replan" if replan_available else "origin") %}
+      {% set plan_summary_text = replan_view.summary if (current_mode == "replan" and replan_available) else origin_view.summary %}
+      {% set plan_id = "plan-tabs-" ~ goal.id %}
+
+      {% if show_replan or origin_available or replan_available %}
+        {% set replan_confidence = replan.confidence if replan.confidence else "Low" %}
+        {% if replan_confidence == "High" %}
+          {% set replan_badge_class = "bg-emerald-100 text-emerald-700" %}
+        {% elif replan_confidence == "Med" %}
+          {% set replan_badge_class = "bg-amber-100 text-amber-800" %}
+        {% else %}
+          {% set replan_badge_class = "bg-rose-100 text-rose-700" %}
+        {% endif %}
+        {% set replan_evidence_ids = replan.evidence_ids if replan.evidence_ids else [] %}
+        {% set replan_evidence = namespace(items=[]) %}
+        {% for eid in replan_evidence_ids %}
+          {% set ev = evidence_map.items.get(eid) %}
+          {% if ev %}
+            {% set _ = replan_evidence.items.append(ev) %}
+          {% endif %}
+        {% endfor %}
+        <div class="mt-3 text-xs text-slate-500">Plan Summary</div>
+        <div class="mt-2 rounded border border-slate-200 bg-white p-2">
+          {% if plan_summary_text %}
+            <div class="text-sm font-medium text-slate-700">{{ plan_summary_text }}</div>
+          {% endif %}
+          {% if show_replan and replan.why %}
+            <div class="mt-1 text-xs text-slate-500">Why: {{ replan.why }}</div>
+          {% endif %}
+          <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {{ replan_badge_class }}">
+              {{ replan_confidence }}
+            </span>
+            {% if replan_evidence.items|length > 0 %}
+              <details class="text-xs text-slate-500">
+                <summary class="cursor-pointer">Evidence ({{ replan_evidence.items|length }})</summary>
+                <div class="mt-2 space-y-2">
+                  {% for ev in replan_evidence.items %}
+                    <div class="rounded border border-slate-200 bg-white p-2 shadow-sm">
+                      <div class="text-slate-700">{{ ev.quote }}</div>
+                      <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                        <span>{{ ev.source_type }} · {{ ev.date }}</span>
+                        {% if ev.url %}
+                          <a class="underline" href="{{ ev.url }}">Open</a>
+                        {% endif %}
+                      </div>
+                    </div>
+                  {% endfor %}
+                </div>
+              </details>
+            {% else %}
+              <span class="text-xs text-slate-400">Evidence (0)</span>
+            {% endif %}
+          </div>
+          <details class="mt-2 text-xs text-slate-500">
+            <summary class="cursor-pointer">Show detail</summary>
+            <div class="mt-2 rounded border border-slate-200 bg-slate-50 p-3">
+              <style>
+                #{{ plan_id }}-replan:checked ~ .plan-panels .plan-replan { display: block; }
+                #{{ plan_id }}-replan:checked ~ .plan-panels .plan-original { display: none; }
+                #{{ plan_id }}-original:checked ~ .plan-panels .plan-replan { display: none; }
+                #{{ plan_id }}-original:checked ~ .plan-panels .plan-original { display: block; }
+                #{{ plan_id }}-replan:checked ~ .plan-tabs label[for="{{ plan_id }}-replan"] {
+                  background-color: #f1f5f9;
+                  color: #1f2937;
+                }
+                #{{ plan_id }}-original:checked ~ .plan-tabs label[for="{{ plan_id }}-original"] {
+                  background-color: #f1f5f9;
+                  color: #1f2937;
+                }
+              </style>
+              {% if origin_available or replan_available %}
+                <input
+                  id="{{ plan_id }}-replan"
+                  type="radio"
+                  name="{{ plan_id }}"
+                  class="hidden"
+                  {% if current_mode == "replan" %}checked{% endif %}
+                />
+                <input
+                  id="{{ plan_id }}-original"
+                  type="radio"
+                  name="{{ plan_id }}"
+                  class="hidden"
+                  {% if current_mode == "origin" %}checked{% endif %}
+                />
+              {% endif %}
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                {% if origin_available or replan_available %}
+                  <div class="plan-tabs inline-flex rounded border border-slate-200 bg-white text-xs">
+                    <label
+                      for="{{ plan_id }}-replan"
+                      class="cursor-pointer px-2 py-0.5 text-slate-600"
+                    >
+                      Replan
+                    </label>
+                    <label
+                      for="{{ plan_id }}-original"
+                      class="cursor-pointer px-2 py-0.5 text-slate-600"
+                    >
+                      Origin
+                    </label>
+                  </div>
+                {% endif %}
+              </div>
+
+              <div class="plan-panels mt-2">
+                <div class="plan-replan">
+                  {% if replan_available and replan_view.detail %}
+                    <pre class="text-xs text-slate-500 whitespace-pre-wrap">{{ replan_view.detail }}</pre>
+                  {% else %}
+                    <div class="text-xs text-slate-400">No replan</div>
+                  {% endif %}
+                </div>
+                <div class="plan-original{% if current_mode == "replan" %} hidden{% endif %}">
+                  {% if origin_available and origin_view.detail %}
+                    <pre class="text-xs text-slate-500 whitespace-pre-wrap">{{ origin_view.detail }}</pre>
+                  {% else %}
+                    <div class="text-xs text-slate-400">No original plan</div>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          </details>
+        </div>
+      {% endif %}
       {% if analysis.highlights %}
         <div class="mt-3 text-xs text-slate-500">Highlights</div>
-        <div class="mt-1 space-y-1">
+        <div class="mt-2 space-y-2">
           {% for item in analysis.highlights %}
-            <div class="text-sm text-slate-600">{{ item.text }}</div>
-          {% endfor %}
-        </div>
-      {% endif %}
-      {% set matched = analysis.evidence.matched_evidence if analysis.evidence else [] %}
-      {% set quotes = analysis.intent.evidence_quotes if analysis.intent else [] %}
-      {% if matched or quotes %}
-        <div class="mt-3 text-xs text-slate-500">Evidence</div>
-        <div class="mt-1 space-y-1">
-          {% if matched %}
-            {% for item in matched %}
-              <div class="text-sm text-slate-600">
-                <a class="underline" href="{{ item.link }}">{{ item.quote }}</a>
-              </div>
+            {% if item is mapping %}
+              {% set item_text = item.text %}
+              {% set item_confidence = item.confidence if item.confidence else "Low" %}
+              {% set needs_confirmation = item.needs_confirmation %}
+              {% set evidence_ids = item.evidence_ids if item.evidence_ids else [] %}
+            {% else %}
+              {% set item_text = item %}
+              {% set item_confidence = "Low" %}
+              {% set needs_confirmation = true %}
+              {% set evidence_ids = [] %}
+            {% endif %}
+            {% if item_confidence == "High" %}
+              {% set badge_class = "bg-emerald-100 text-emerald-700" %}
+            {% elif item_confidence == "Med" %}
+              {% set badge_class = "bg-amber-100 text-amber-800" %}
+            {% else %}
+              {% set badge_class = "bg-rose-100 text-rose-700" %}
+            {% endif %}
+            {% set evidence_items = namespace(items=[]) %}
+            {% for eid in evidence_ids %}
+              {% set ev = evidence_map.items.get(eid) %}
+              {% if ev %}
+                {% set _ = evidence_items.items.append(ev) %}
+              {% endif %}
             {% endfor %}
-          {% else %}
-            {% for item in quotes %}
-              <div class="text-sm text-slate-600">
-                <a class="underline" href="{{ item.link }}">{{ item.quote }}</a>
+            <div class="rounded border border-slate-200 bg-white p-2">
+              <div class="text-sm font-medium text-slate-700">{{ item_text }}</div>
+              <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {{ badge_class }}">
+                  {{ item_confidence }}
+                </span>
+                {% if evidence_items.items|length > 0 %}
+                  <details class="text-xs text-slate-500">
+                    <summary class="cursor-pointer">Evidence ({{ evidence_items.items|length }})</summary>
+                    <div class="mt-2 space-y-2">
+                      {% for ev in evidence_items.items %}
+                        <div class="rounded border border-slate-200 bg-white p-2 shadow-sm">
+                          <div class="text-slate-700">{{ ev.quote }}</div>
+                          <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                            <span>{{ ev.source_type }} · {{ ev.date }}</span>
+                            {% if ev.url %}
+                              <a class="underline" href="{{ ev.url }}">Open</a>
+                            {% endif %}
+                          </div>
+                        </div>
+                      {% endfor %}
+                    </div>
+                  </details>
+                {% else %}
+                  <span class="text-xs text-slate-400">Evidence (0)</span>
+                {% endif %}
+                {% if needs_confirmation or evidence_items.items|length == 0 %}
+                  <span class="text-xs text-slate-400">Needs confirmation / 缺少记录</span>
+                {% endif %}
               </div>
-            {% endfor %}
-          {% endif %}
-        </div>
-      {% endif %}
-      {% if analysis.risks %}
-        <div class="mt-3 text-xs text-slate-500">Risks</div>
-        <div class="mt-1 space-y-1">
-          {% for item in analysis.risks %}
-            <div class="text-sm text-slate-600">{{ item }}</div>
+            </div>
           {% endfor %}
         </div>
       {% endif %}
       {% if analysis.next_steps %}
         <div class="mt-3 text-xs text-slate-500">Next steps</div>
-        <div class="mt-1 space-y-1">
+        <div class="mt-2 space-y-2">
           {% for item in analysis.next_steps %}
-            <div class="text-sm text-slate-600">{{ item.text if item is mapping else item }}</div>
+            {% if item is mapping %}
+              {% set item_text = item.text %}
+              {% set item_confidence = item.confidence if item.confidence else "Low" %}
+              {% set needs_confirmation = item.needs_confirmation %}
+              {% set evidence_ids = item.evidence_ids if item.evidence_ids else [] %}
+              {% set step_key = item.step_key if item.step_key else "" %}
+            {% else %}
+              {% set item_text = item %}
+              {% set item_confidence = "Low" %}
+              {% set needs_confirmation = true %}
+              {% set evidence_ids = [] %}
+              {% set step_key = "" %}
+            {% endif %}
+            {% if item_confidence == "High" %}
+              {% set badge_class = "bg-emerald-100 text-emerald-700" %}
+            {% elif item_confidence == "Med" %}
+              {% set badge_class = "bg-amber-100 text-amber-800" %}
+            {% else %}
+              {% set badge_class = "bg-rose-100 text-rose-700" %}
+            {% endif %}
+            {% set evidence_items = namespace(items=[]) %}
+            {% for eid in evidence_ids %}
+              {% set ev = evidence_map.items.get(eid) %}
+              {% if ev %}
+                {% set _ = evidence_items.items.append(ev) %}
+              {% endif %}
+            {% endfor %}
+            <div
+              class="next-step-item rounded border border-slate-200 bg-white p-2"
+              data-goal-id="{{ goal.id }}"
+              data-suggestion-id="{{ analysis.id }}"
+              data-step-key="{{ step_key }}"
+              data-step-text="{{ item_text }}"
+            >
+              <div class="text-sm font-medium text-slate-700">{{ item_text }}</div>
+              {% if item is mapping and item.reason %}
+                <div class="mt-1 text-xs text-slate-400">{{ item.reason }}</div>
+              {% elif item is mapping %}
+                <div class="mt-1 text-xs text-slate-400">Reason: Pending confirmation</div>
+              {% endif %}
+              <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {{ badge_class }}">
+                  {{ item_confidence }}
+                </span>
+                {% if evidence_items.items|length > 0 %}
+                  <details class="text-xs text-slate-500">
+                    <summary class="cursor-pointer">Evidence ({{ evidence_items.items|length }})</summary>
+                    <div class="mt-2 space-y-2">
+                      {% for ev in evidence_items.items %}
+                        <div class="rounded border border-slate-200 bg-white p-2 shadow-sm">
+                          <div class="text-slate-700">{{ ev.quote }}</div>
+                          <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                            <span>{{ ev.source_type }} · {{ ev.date }}</span>
+                            {% if ev.url %}
+                              <a class="underline" href="{{ ev.url }}">Open</a>
+                            {% endif %}
+                          </div>
+                        </div>
+                      {% endfor %}
+                    </div>
+                  </details>
+                {% else %}
+                  <span class="text-xs text-slate-400">Evidence (0)</span>
+                {% endif %}
+                {% if needs_confirmation or evidence_items.items|length == 0 %}
+                  <span class="text-xs text-slate-400">Needs confirmation / 缺少记录</span>
+                {% endif %}
+                <span class="next-step-status text-xs text-slate-400"></span>
+              </div>
+              <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                <button
+                  type="button"
+                  class="next-step-action px-2 py-1 border rounded border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                  data-action="accepted"
+                  {% if not step_key %}disabled{% endif %}
+                >
+                  Add to plan
+                </button>
+                <button
+                  type="button"
+                  class="next-step-action px-2 py-1 border rounded border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
+                  data-action="completed"
+                  {% if not step_key %}disabled{% endif %}
+                >
+                  Completed
+                </button>
+                <button
+                  type="button"
+                  class="next-step-action px-2 py-1 border rounded border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                  data-action="delayed"
+                  {% if not step_key %}disabled{% endif %}
+                >
+                  Delay
+                </button>
+                <button
+                  type="button"
+                  class="next-step-action px-2 py-1 border rounded border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                  data-action="rejected"
+                  {% if not step_key %}disabled{% endif %}
+                >
+                  Reject
+                </button>
+              </div>
+              <div class="next-step-panel next-step-panel-accepted mt-2 hidden text-xs text-slate-500">
+                <label class="inline-flex items-center gap-2">
+                  <span>Due date</span>
+                  <input class="next-step-due-date border rounded px-2 py-1" type="date" />
+                </label>
+                <button type="button" class="next-step-confirm px-2 py-1 border rounded">
+                  Confirm
+                </button>
+                <button type="button" class="next-step-cancel px-2 py-1 border rounded">
+                  Cancel
+                </button>
+              </div>
+              <div class="next-step-panel next-step-panel-completed mt-2 hidden text-xs text-slate-500">
+                <input
+                  class="next-step-completion-note border rounded px-2 py-1"
+                  type="text"
+                  placeholder="Optional note"
+                />
+                <button type="button" class="next-step-confirm px-2 py-1 border rounded">
+                  Confirm
+                </button>
+                <button type="button" class="next-step-cancel px-2 py-1 border rounded">
+                  Cancel
+                </button>
+              </div>
+              <div class="next-step-panel next-step-panel-delayed mt-2 hidden text-xs text-slate-500">
+                <select class="next-step-delay border rounded px-2 py-1">
+                  <option value="3">Delay 3 days</option>
+                  <option value="7" selected>Delay 7 days</option>
+                  <option value="14">Delay 14 days</option>
+                  <option value="30">Delay 30 days</option>
+                </select>
+                <button type="button" class="next-step-confirm px-2 py-1 border rounded">
+                  Confirm
+                </button>
+                <button type="button" class="next-step-cancel px-2 py-1 border rounded">
+                  Cancel
+                </button>
+              </div>
+              <div class="next-step-panel next-step-panel-rejected mt-2 hidden text-xs text-slate-500">
+                <select class="next-step-reason border rounded px-2 py-1">
+                  <option value="">Select reason</option>
+                  <option value="not_needed">项目不需要</option>
+                  <option value="deprioritized">不优先/以后再说</option>
+                  <option value="has_alternative">已有替代方案</option>
+                  <option value="inaccurate">信息不准确</option>
+                  <option value="other">其他</option>
+                </select>
+                <input
+                  class="next-step-reason-detail border rounded px-2 py-1 hidden"
+                  type="text"
+                  placeholder="简短说明"
+                />
+                <button type="button" class="next-step-confirm px-2 py-1 border rounded">
+                  Confirm
+                </button>
+                <button type="button" class="next-step-cancel px-2 py-1 border rounded">
+                  Cancel
+                </button>
+              </div>
+            </div>
           {% endfor %}
         </div>
       {% endif %}
-      {% if analysis.assumptions %}
-        <div class="mt-3 text-xs text-slate-500">Assumptions</div>
-        <div class="mt-1 space-y-1">
-          {% for item in analysis.assumptions %}
-            <div class="text-sm text-slate-600">{{ item }}</div>
-          {% endfor %}
-        </div>
-      {% endif %}
-      {% if analysis.ask_back %}
-        <div class="mt-3 text-xs text-slate-500">Ask back</div>
-        <div class="mt-1 text-sm text-slate-600">{{ analysis.ask_back }}</div>
-      {% endif %}
+      <script>
+        if (!window.__nextStepFeedbackBound) {
+          window.__nextStepFeedbackBound = true;
+          const hidePanels = (item) => {
+            item.querySelectorAll(".next-step-panel").forEach((panel) => {
+              panel.classList.add("hidden");
+            });
+          };
+          const postAction = async (item, payload) => {
+            const goalId = item.dataset.goalId;
+            const response = await fetch(`/goals/${goalId}/next_steps/act`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+            if (!response.ok) {
+              alert("Action failed. Please try again.");
+              return;
+            }
+            const data = await response.json();
+            if (!data.ok) {
+              alert("Action failed. Please try again.");
+              return;
+            }
+            item.remove();
+          };
+
+          document.addEventListener("click", async (event) => {
+            const actionBtn = event.target.closest(".next-step-action");
+            const confirmBtn = event.target.closest(".next-step-confirm");
+            const cancelBtn = event.target.closest(".next-step-cancel");
+
+            if (actionBtn) {
+              const item = actionBtn.closest(".next-step-item");
+              if (!item) return;
+              const action = actionBtn.dataset.action;
+              hidePanels(item);
+              const panel = item.querySelector(`.next-step-panel-${action}`);
+              if (panel) panel.classList.remove("hidden");
+              return;
+            }
+
+            if (cancelBtn) {
+              const item = cancelBtn.closest(".next-step-item");
+              if (!item) return;
+              hidePanels(item);
+              return;
+            }
+
+            if (confirmBtn) {
+              const item = confirmBtn.closest(".next-step-item");
+              if (!item) return;
+              const panel = confirmBtn.closest(".next-step-panel");
+              if (!panel) return;
+              const suggestionId = item.dataset.suggestionId;
+              const stepKey = item.dataset.stepKey;
+              const stepText = item.dataset.stepText;
+              const action = panel.classList.contains("next-step-panel-accepted")
+                ? "accepted"
+                : panel.classList.contains("next-step-panel-completed")
+                ? "completed"
+                : panel.classList.contains("next-step-panel-delayed")
+                ? "delayed"
+                : "rejected";
+
+              const payload = {
+                suggestion_id: suggestionId,
+                step_key: stepKey,
+                step_text: stepText,
+                action,
+              };
+
+              if (action === "accepted") {
+                const dueInput = panel.querySelector(".next-step-due-date");
+                payload.due_date = dueInput ? dueInput.value : "";
+              }
+              if (action === "completed") {
+                const noteInput = panel.querySelector(".next-step-completion-note");
+                payload.completion_note = noteInput ? noteInput.value : "";
+              }
+              if (action === "delayed") {
+                const delaySelect = panel.querySelector(".next-step-delay");
+                payload.delay_days = delaySelect ? delaySelect.value : "7";
+              }
+              if (action === "rejected") {
+                const reasonSelect = panel.querySelector(".next-step-reason");
+                const reason = reasonSelect ? reasonSelect.value : "";
+                if (!reason) {
+                  alert("Please choose a reason.");
+                  return;
+                }
+                payload.reason = reason;
+                const detailInput = panel.querySelector(".next-step-reason-detail");
+                payload.reason_detail =
+                  reason === "other" && detailInput ? detailInput.value : "";
+              }
+              await postAction(item, payload);
+            }
+          });
+
+          document.addEventListener("change", (event) => {
+            const select = event.target.closest(".next-step-reason");
+            if (!select) return;
+            const panel = select.closest(".next-step-panel-rejected");
+            if (!panel) return;
+            const detail = panel.querySelector(".next-step-reason-detail");
+            if (!detail) return;
+            detail.classList.toggle("hidden", select.value !== "other");
+          });
+        }
+      </script>
       {% if analysis.metrics %}
         <div class="mt-3 text-xs text-slate-400">
           coverage {{ analysis.metrics.coverage }} · alignment {{ analysis.metrics.alignment }} · confidence {{ analysis.metrics.confidence }}

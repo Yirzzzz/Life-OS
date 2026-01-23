@@ -75,6 +75,7 @@ Desktop.ini
 # Explicit database file names (optional)
 app.db
 lifeos.db
+lifeos.db_副本
 
 
 __pycache__/
