@@ -8,7 +8,7 @@ Life OS 是个人开发的一个 『习惯/日记/计划』 管理的Agent分析
 
 ### 『User interaction』→ 👶 v0.4
 
-* NEW❗❗❗ !新增——对『Goal Analysis』中的Next steps进行选择：加入短期计划、已完成（因为可能有些任务已经完成但是日志没有记录）、推迟、拒绝
+* NEW❗❗❗ 新增——对『Goal Analysis』中的Next steps进行选择：加入短期计划、已完成（因为可能有些任务已经完成但是日志没有记录）、推迟、拒绝
 
 ![image-20260123151109081](assets/image-20260123151109081.png)
 
