@@ -283,11 +283,13 @@ def _serialize_plan_item(item: PlanItem, plan_date: Optional[date]) -> Dict[str,
 def _serialize_next_step_feedback(
     feedback: NextStepFeedback,
 ) -> Dict[str, Any]:
+    step_text = (feedback.step_text_snapshot or "").strip()
     return {
         "id": feedback.id,
         "suggestion_id": feedback.suggestion_id,
         "step_key": feedback.step_key,
-        "step_text": feedback.step_text_snapshot or "",
+        "step_text": step_text,
+        "evidence_text": f"（{feedback.action}：{step_text}）",
         "action": feedback.action,
         "reason": feedback.reason,
         "reason_detail": feedback.reason_detail or "",
@@ -437,6 +439,7 @@ def _run_rules_graph(
     result = graph.run(payload, model_key, api_key)
     output = result.get("output", {})
     node_a = result.get("node_a", {})
+    _apply_next_step_feedback_evidence(node_a, payload)
     related_events = node_a.get("related_events") or []
     evidence_quotes = [
         {
@@ -466,6 +469,47 @@ def _run_rules_graph(
     output["evidence"] = {"matched_evidence": matched_evidence}
     output["plan"] = result.get("node_b", {})
     return output
+
+
+def _apply_next_step_feedback_evidence(
+    node_a: Dict[str, Any], payload: Dict[str, Any]
+) -> None:
+    evidence = node_a.get("evidence")
+    if not isinstance(evidence, list):
+        return
+    feedback_items = payload.get("recent_next_step_feedback") or []
+    feedback_by_id = {
+        item.get("id"): item
+        for item in feedback_items
+        if isinstance(item, dict) and item.get("id") is not None
+    }
+    if not feedback_by_id:
+        return
+    for item in evidence:
+        if not isinstance(item, dict):
+            continue
+        if item.get("source_type") != "next_step_feedback":
+            continue
+        source_id = item.get("source_id")
+        feedback = feedback_by_id.get(source_id)
+        if not feedback:
+            continue
+        evidence_text = feedback.get("evidence_text")
+        if evidence_text:
+            item["quote"] = evidence_text
+        tags = item.get("tags") if isinstance(item.get("tags"), list) else []
+        action = feedback.get("action")
+        if action and action not in tags:
+            tags.append(action)
+        snooze_until = feedback.get("snooze_until") or ""
+        if snooze_until:
+            snooze_date = snooze_until.split("T", 1)[0]
+            snooze_tag = f"snooze_until={snooze_date}"
+            if snooze_tag not in tags:
+                tags.append(snooze_tag)
+        if len(tags) > 3:
+            tags = tags[:3]
+        item["tags"] = tags
 
 
 def get_skill() -> Skill:
