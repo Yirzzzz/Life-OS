@@ -88,6 +88,16 @@ class GoalAnalysisSkill(Skill):
             if item.linked_goal_id == goal.id
             or (item.linked_objective_id in objective_ids)
         ]
+        feedback_start = goal.created_at.date() if goal.created_at else window_start
+        feedback_start_dt = datetime.combine(feedback_start, datetime.min.time())
+        feedback_end_dt = datetime.combine(data.as_of, datetime.max.time())
+        next_step_feedback = session.exec(
+            select(NextStepFeedback).where(
+                NextStepFeedback.goal_id == goal.id,
+                NextStepFeedback.created_at >= feedback_start_dt,
+                NextStepFeedback.created_at <= feedback_end_dt,
+            )
+        ).all()
 
         payload = _build_payload(
             goal=goal,
@@ -96,6 +106,7 @@ class GoalAnalysisSkill(Skill):
             logs=logs,
             plan_items=goal_items,
             plan_by_id=plan_by_id,
+            next_step_feedback=next_step_feedback,
             window_start=window_start,
             window_end=window_end,
             window_days=window_days,
@@ -269,6 +280,30 @@ def _serialize_plan_item(item: PlanItem, plan_date: Optional[date]) -> Dict[str,
     }
 
 
+def _serialize_next_step_feedback(
+    feedback: NextStepFeedback,
+) -> Dict[str, Any]:
+    return {
+        "id": feedback.id,
+        "suggestion_id": feedback.suggestion_id,
+        "step_key": feedback.step_key,
+        "step_text": feedback.step_text_snapshot or "",
+        "action": feedback.action,
+        "reason": feedback.reason,
+        "reason_detail": feedback.reason_detail or "",
+        "completion_note": feedback.completion_note or "",
+        "snooze_until": feedback.snooze_until.isoformat()
+        if feedback.snooze_until
+        else "",
+        "user_due_date": feedback.user_due_date.isoformat()
+        if feedback.user_due_date
+        else "",
+        "created_short_term_objective_id": feedback.created_short_term_objective_id,
+        "created_plan_item_id": feedback.created_plan_item_id,
+        "created_at": feedback.created_at.isoformat() if feedback.created_at else "",
+    }
+
+
 def _build_payload(
     goal: Goal,
     milestones: List[Milestone],
@@ -276,6 +311,7 @@ def _build_payload(
     logs: List[DayLog],
     plan_items: List[PlanItem],
     plan_by_id: Dict[int, date],
+    next_step_feedback: List[NextStepFeedback],
     window_start: date,
     window_end: date,
     window_days: int,
@@ -284,6 +320,9 @@ def _build_payload(
     logs_payload = [_serialize_log(log) for log in logs]
     plan_items_payload = [
         _serialize_plan_item(item, plan_by_id.get(item.daily_plan_id)) for item in plan_items
+    ]
+    next_step_feedback_payload = [
+        _serialize_next_step_feedback(feedback) for feedback in next_step_feedback
     ]
     objectives_payload = [
         {
@@ -380,6 +419,7 @@ def _build_payload(
         "short_term_objectives": objectives_payload,
         "recent_logs": logs_payload,
         "recent_plan_items": plan_items_payload,
+        "recent_next_step_feedback": next_step_feedback_payload,
         "recent_habits": [],
         "window": {
             "start": window_start.isoformat(),

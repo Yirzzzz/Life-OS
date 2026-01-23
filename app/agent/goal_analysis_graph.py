@@ -140,7 +140,7 @@ def _run_parallel_ab(
     return node_a, node_b, node_a_meta, node_b_meta
 def _build_prompt_node_a(payload: Dict[str, Any], lang: str) -> str:
     schema = (
-        '{"evidence":[{"id":int,"date":"YYYY-MM-DD","source_type":"log|plan|objective|milestone","source_id":int,'
+        '{"evidence":[{"id":int,"date":"YYYY-MM-DD","source_type":"log|plan|objective|milestone|next_step_feedback","source_id":int,'
         '"quote":str,"url":str,"tags":[str]}],'
         '"habit_summary":{"top_patterns":[{"text":str,"evidence_ids":[int]}],'
         '"blockers":[{"text":str,"evidence_ids":[int]}],'
@@ -154,6 +154,7 @@ def _build_prompt_node_a(payload: Dict[str, Any], lang: str) -> str:
     plans = payload.get("recent_plan_items", [])
     objectives = payload.get("short_term_objectives", [])
     milestones = payload.get("milestones", [])
+    next_step_feedback = payload.get("recent_next_step_feedback", [])
 
     if lang == "en":
         return (
@@ -161,7 +162,7 @@ def _build_prompt_node_a(payload: Dict[str, Any], lang: str) -> str:
             "Goal: extract ONLY evidence and habit patterns that are DIRECTLY relevant to the given goal.\n"
             "\n"
             "SCOPE CONSTRAINT (MOST IMPORTANT):\n"
-            "- You MUST only use logs/plans/objectives/milestones that are clearly related to goal.title/goal.description_md.\n"
+            "- You MUST only use logs/plans/objectives/milestones/next_step_feedback that are clearly related to goal.title/goal.description_md.\n"
             "- Relevance definition: an item is relevant only if it (a) describes work/action/outcome toward the goal, or\n"
             "  (b) describes a blocker/trigger that directly affects progress on the goal.\n"
             "- If you cannot explain the connection to the goal, it is NOT relevant and MUST be excluded.\n"
@@ -184,6 +185,7 @@ def _build_prompt_node_a(payload: Dict[str, Any], lang: str) -> str:
             "\n"
             "WHAT TO EXTRACT:\n"
             "1) evidence: pick up to 10 most informative GOAL-RELEVANT items (prefer logs). Assign incremental id starting from 1.\n"
+            "- You can use next_step_feedback as evidence when it directly reflects goal-related actions or decisions.\n"
             "2) habit_summary:\n"
             "   - top_patterns: 1–3 recurring goal-related behavior patterns you can prove from evidence.\n"
             "   - blockers: 1–3 recurring goal-related blockers.\n"
@@ -199,7 +201,8 @@ def _build_prompt_node_a(payload: Dict[str, Any], lang: str) -> str:
             f"logs: {json.dumps(logs, ensure_ascii=False)}\n"
             f"plans: {json.dumps(plans, ensure_ascii=False)}\n"
             f"objectives: {json.dumps(objectives, ensure_ascii=False)}\n"
-            f"milestones: {json.dumps(milestones, ensure_ascii=False)}"
+            f"milestones: {json.dumps(milestones, ensure_ascii=False)}\n"
+            f"next_step_feedback: {json.dumps(next_step_feedback, ensure_ascii=False)}"
         )
 
     return (
@@ -207,7 +210,7 @@ def _build_prompt_node_a(payload: Dict[str, Any], lang: str) -> str:
         "目标：只提取与 goal.title / goal.description_md 直接相关的证据与习惯模式。\n"
         "\n"
         "范围约束（最重要，必须遵守）：\n"
-        "- 你只能使用与目标明确相关的 logs/plans/objectives/milestones。\n"
+        "- 你只能使用与目标明确相关的 logs/plans/objectives/milestones/next_step_feedback。\n"
         "- “相关”的定义：一条记录必须 (a) 直接描述推进目标的行动/产出/结果，或 (b) 直接描述影响该目标推进的阻碍/触发因素。\n"
         "- 如果你无法用一句话解释“它如何影响这个目标”，则判定为不相关，必须排除。\n"
         "\n"
@@ -229,6 +232,7 @@ def _build_prompt_node_a(payload: Dict[str, Any], lang: str) -> str:
         "\n"
         "你需要输出：\n"
         "1) evidence：最多 10 条“最关键的目标相关证据”（优先 logs），id 从 1 递增。\n"
+        "- 可以使用 next_step_feedback 作为证据，但必须直接反映与目标相关的行动或决策。\n"
         "2) habit_summary（也必须是目标相关）：\n"
         "   - top_patterns：1–3 条“反复出现的、与目标推进相关的行为模式”（要能被证据支撑）。\n"
         "   - blockers：1–3 条“反复出现的、影响目标推进的阻碍/卡点”。\n"
@@ -244,7 +248,8 @@ def _build_prompt_node_a(payload: Dict[str, Any], lang: str) -> str:
         f"logs: {json.dumps(logs, ensure_ascii=False)}\n"
         f"plans: {json.dumps(plans, ensure_ascii=False)}\n"
         f"objectives: {json.dumps(objectives, ensure_ascii=False)}\n"
-        f"milestones: {json.dumps(milestones, ensure_ascii=False)}"
+        f"milestones: {json.dumps(milestones, ensure_ascii=False)}\n"
+        f"next_step_feedback: {json.dumps(next_step_feedback, ensure_ascii=False)}"
     )
 
 
